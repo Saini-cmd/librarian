@@ -1,0 +1,23 @@
+.env
+.venv/
+venv/
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.DS_Store
+
+# Generated RAG artifacts
+data/chunks/
+data/repos/
+qdrant_db/
+*.pkl
+*.pickle
+*.parquet
+*.db
+*.sqlite
+*.sqlite3
+
+# Editor and notebook noise
+.vscode/
+*.ipynb_checkpoints/

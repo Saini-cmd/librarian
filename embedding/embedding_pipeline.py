@@ -1,0 +1,79 @@
+"""
+Embedding pipeline
+
+Handles:
+- Load chunks from data/chunks/{repo_name}.pkl
+- Skip already embedded chunks via Qdrant lookup
+- Embed and upsert to Qdrant in batches
+- Delete pickle after successful upsert
+"""
+
+import os
+import pickle
+from pathlib import Path
+from typing import List
+
+from tqdm import tqdm
+
+from chunking.chunk_model import CodeChunk
+from embedding.embedder import Embedder
+from vector_store.indexer import VectorIndexer
+
+
+CHUNKS_DIR = Path("data/chunks")
+COLLECTION_NAME = "code_chunks"
+
+
+class EmbeddingPipeline:
+
+    def __init__(self):
+        self.embedder = Embedder()
+        self.indexer = VectorIndexer(
+            collection_name=COLLECTION_NAME,
+            embedding_dim=self.embedder.embedding_dim
+        )
+
+    def embed_repo(self, repo_name: str):
+
+        pickle_path = CHUNKS_DIR / f"{repo_name}.pkl"
+
+        if not pickle_path.exists():
+            print(f"[EmbeddingPipeline] No chunks found for: {repo_name}")
+            return
+
+        with open(pickle_path, "rb") as f:
+            chunks: List[CodeChunk] = pickle.load(f)
+
+        print(f"[EmbeddingPipeline] Loaded {len(chunks)} chunks for {repo_name}")
+
+        # Filter already indexed chunks
+        new_chunks = [
+            chunk for chunk in tqdm(chunks, desc="Checking Qdrant")
+            if not self.indexer.exists(chunk.chunk_id)
+        ]
+
+        # new_chunks = chunks  #===============================================================
+
+        print(f"[EmbeddingPipeline] {len(chunks) - len(new_chunks)} already indexed, {len(new_chunks)} to embed")
+
+        if not new_chunks:
+            print("[EmbeddingPipeline] Nothing to embed, cleaning up pickle...")
+            self._cleanup(pickle_path)
+            return
+
+        # Embed
+        embeddings = self.embedder.embed_chunks(new_chunks)
+
+        # Index to Qdrant
+        self.indexer.index(new_chunks, embeddings)
+
+        # Cleanup pickle
+        self._cleanup(pickle_path)
+
+    def _cleanup(self, pickle_path: Path):
+        os.remove(pickle_path)
+        print(f"[EmbeddingPipeline] Deleted: {pickle_path}")
+
+        if not any(CHUNKS_DIR.iterdir()):
+            CHUNKS_DIR.rmdir()
+            print(f"[EmbeddingPipeline] Removed empty dir: {CHUNKS_DIR}")

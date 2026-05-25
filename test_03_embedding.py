@@ -1,0 +1,28 @@
+from ingestion.ingestion_pipeline import IngestionPipeline
+from chunking.chunk_pipeline import ChunkPipeline
+from embedding.embedding_pipeline import EmbeddingPipeline
+
+
+REPOS = [
+    "https://github.com/Saini-cmd/lynko.git",
+]
+
+
+def main():
+    ingestion = IngestionPipeline()
+    chunker = ChunkPipeline()
+    embedder = EmbeddingPipeline()
+
+    for repo_url in REPOS:
+        name = repo_url.removesuffix(".git").split("/")[-1]
+        print(f"\nProcessing: {repo_url}")
+
+        files = ingestion.ingest(repo_url)
+        chunks = chunker.chunk_repository(files, repo_name=name)
+        print(f"Total chunks: {len(chunks)}")
+
+        embedder.embed_repo(name)
+
+
+if __name__ == "__main__":
+    main()
