@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field
+import os
 from typing import Any
 
 from chunking.chunk_model import CodeChunk
@@ -50,8 +51,8 @@ class PromptPayload:
 
 @dataclass(frozen=True)
 class LLMConfig:
-    model: str = "gemma4:e2b-it-q4_K_M"
-    base_url: str = "http://localhost:11434"
+    model: str = field(default_factory=lambda: os.getenv("OLLAMA_MODEL", "gemma4:e2b-it-q4_K_M"))
+    base_url: str = field(default_factory=lambda: os.getenv("OLLAMA_HOST", "http://localhost:11434"))
     temperature: float = 0.1
     max_tokens: int = 1024
     timeout_seconds: float = 300.0

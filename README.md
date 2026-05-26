@@ -10,6 +10,7 @@ Code RAG for repository ingestion, semantic chunking, embedding, hybrid retrieva
 - Stores vectors in local Qdrant under `qdrant_db/`
 - Retrieves context with vector search, BM25, RRF, and reranking
 - Generates answers from retrieved code context with a local Ollama model
+- Presents a modern React frontend for repo ingestion and chat workflow
 
 ## Local LLM
 
@@ -50,6 +51,20 @@ Make sure `ollama serve` is running and the model is installed before testing.
 - `python tests/test_06_wipe_qdrant_db.py` - clear the local Qdrant database
 - `python tests/test_07_answer_generation.py` - end-to-end retrieval + answer generation
 
+## Frontend
+
+The UI is now a React app under [`frontend/`](frontend).
+
+To run it locally:
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+The first screen is a modern landing page with a repository link input, a single start button, a progress bar for preprocessing, and a chat placeholder that becomes available after the pipeline completes.
+
 ## Generated Data
 
 These paths are intentionally ignored by git because they are derived at runtime:
@@ -72,3 +87,4 @@ If you need a clean run, wipe the local database and regenerate the artifacts fr
 - `reranking/` - cross-encoder reranking
 - `rag/` - context building, prompt building, Ollama client, and answer generation
 - `vector_store/` - local Qdrant client and schema helpers
+- `frontend/` - React frontend for the ingestion and chat workflow

@@ -16,4 +16,5 @@ tree-sitter-c
 tree-sitter-cpp
 tree-sitter-c-sharp
 tree-sitter-ruby
-streamlit
+fastapi
+uvicorn

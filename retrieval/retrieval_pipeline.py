@@ -1,4 +1,5 @@
 import logging
+import os
 from typing import Any
 
 from reranking.bge_reranker import BGEReranker
@@ -31,11 +32,15 @@ class RetrievalPipeline:
         rrf_k: int = 60,
         rrf_top_k: int = 30,
         final_top_k: int = 8,
+        query_device: str | None = None,
+        reranker_device: str | None = None,
     ):
         self.final_top_k = final_top_k
+        query_device = query_device or os.getenv("RAG_QUERY_DEVICE", "cpu")
+        reranker_device = reranker_device or os.getenv("RAG_RERANKER_DEVICE", "cpu")
 
         self.query_expander = QueryExpander()
-        self.query_embedder = QueryEmbedder(model_name="BAAI/bge-large-en-v1.5")
+        self.query_embedder = QueryEmbedder(model_name="BAAI/bge-large-en-v1.5", device=query_device)
         self.vector_retriever = VectorRetriever(
             collection_name=collection_name,
             top_k=vector_top_k,
@@ -53,7 +58,7 @@ class RetrievalPipeline:
             rrf_top_k=rrf_top_k,
         )
         self.post_processor = PostRetrievalProcessor()
-        self.reranker = BGEReranker(model_name="BAAI/bge-reranker-large")
+        self.reranker = BGEReranker(model_name="BAAI/bge-reranker-large", device=reranker_device)
 
     def retrieve(self, query: str) -> list[dict[str, Any]]:
         logger.info("stage=retrieval_start")
