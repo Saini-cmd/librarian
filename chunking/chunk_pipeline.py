@@ -9,6 +9,8 @@ Routes files to:
 import traceback
 import os
 import pickle
+from pathlib import Path
+from dataclasses import asdict
 from chunking.ast_chunker import ASTChunker
 from chunking.text_chunker import TextChunker
 from chunking.chunk_model import CodeChunk
@@ -51,12 +53,18 @@ class ChunkPipeline:
     def _save_chunks(self, repo_name: str, chunks: List[CodeChunk]):
 
         try:
-            os.makedirs("data/chunks", exist_ok=True)
+            chunks_dir = Path("data/chunks")
+            chunks_dir.mkdir(parents=True, exist_ok=True)
 
-            output_path = os.path.join("data", "chunks", f"{repo_name}.pkl")
+            output_path = chunks_dir / f"{repo_name}.pkl"
+            temp_path = output_path.with_suffix(".pkl.tmp")
 
-            with open(output_path, "wb") as f:
-                pickle.dump(chunks, f)
+            serializable_chunks = [asdict(chunk) for chunk in chunks]
+
+            with open(temp_path, "wb") as f:
+                pickle.dump(serializable_chunks, f)
+
+            temp_path.replace(output_path)
 
             print(f"\nSaved {len(chunks)} chunks → {output_path}")
 

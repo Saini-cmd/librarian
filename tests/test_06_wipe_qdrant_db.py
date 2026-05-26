@@ -2,7 +2,7 @@ from pathlib import Path
 import shutil
 
 
-DB_PATH = Path(__file__).resolve().parent / "qdrant_db"
+DB_PATH = Path(__file__).resolve().parent.parent / "qdrant_db"
 
 
 def main():

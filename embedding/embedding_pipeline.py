@@ -41,8 +41,32 @@ class EmbeddingPipeline:
             print(f"[EmbeddingPipeline] No chunks found for: {repo_name}")
             return
 
-        with open(pickle_path, "rb") as f:
-            chunks: List[CodeChunk] = pickle.load(f)
+        if pickle_path.stat().st_size == 0:
+            print(f"[EmbeddingPipeline] Chunk file is empty and cannot be loaded: {pickle_path}")
+            return
+
+        try:
+            with open(pickle_path, "rb") as f:
+                raw_chunks = pickle.load(f)
+        except EOFError:
+            print(f"[EmbeddingPipeline] Chunk file is corrupted or incomplete: {pickle_path}")
+            return
+        except pickle.UnpicklingError:
+            print(f"[EmbeddingPipeline] Chunk file could not be unpickled: {pickle_path}")
+            return
+
+        chunks: List[CodeChunk] = []
+        for item in raw_chunks:
+            if isinstance(item, CodeChunk):
+                chunks.append(item)
+            elif isinstance(item, dict):
+                chunks.append(CodeChunk(**item))
+            else:
+                print(f"[EmbeddingPipeline] Skipping unsupported chunk record type: {type(item)!r}")
+
+        if not chunks:
+            print(f"[EmbeddingPipeline] No valid chunks were loaded from: {pickle_path}")
+            return
 
         print(f"[EmbeddingPipeline] Loaded {len(chunks)} chunks for {repo_name}")
 

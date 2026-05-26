@@ -37,18 +37,18 @@ Make sure `ollama serve` is running and the model is installed before testing.
 3. Run the answer-generation smoke test.
 
    ```bash
-   python test_07_answer_generation.py
+   python tests/test_07_answer_generation.py
    ```
 
 ## Useful Scripts
 
-- `python test_01_ingestion.py` - clone and scan repositories
-- `python test_02_chunking.py` - chunk files into `CodeChunk` objects
-- `python test_03_embedding.py` - embed chunks and store them in Qdrant
-- `python test_04_view_embedding.py` - inspect stored embeddings
-- `python test_05_retrieval.py` - run retrieval and print expanded queries
-- `python test_06_wipe_qdrant_db.py` - clear the local Qdrant database
-- `python test_07_answer_generation.py` - end-to-end retrieval + answer generation
+- `python tests/test_01_ingestion.py` - clone and scan repositories
+- `python tests/test_02_chunking.py` - chunk files into `CodeChunk` objects
+- `python tests/test_03_embedding.py` - embed chunks and store them in Qdrant
+- `python tests/test_04_view_embedding.py` - inspect stored embeddings
+- `python tests/test_05_retrieval.py` - run retrieval and print expanded queries
+- `python tests/test_06_wipe_qdrant_db.py` - clear the local Qdrant database
+- `python tests/test_07_answer_generation.py` - end-to-end retrieval + answer generation
 
 ## Generated Data
 
