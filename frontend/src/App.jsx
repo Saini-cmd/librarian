@@ -18,6 +18,7 @@ const sampleMessages = [
 
 function App() {
   const [repoLink, setRepoLink] = useState('');
+  const [mode, setMode] = useState('local');
   const [phase, setPhase] = useState('idle');
   const [statusText, setStatusText] = useState('Paste a repository link to begin.');
   const [progress, setProgress] = useState(0);
@@ -57,7 +58,7 @@ function App() {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ repo_url: repoLink.trim() }),
+        body: JSON.stringify({ repo_url: repoLink.trim(), mode }),
       })
       .then(async (response) => {
         if (!response.ok) {
@@ -158,7 +159,7 @@ function App() {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ message: userMessage }),
+        body: JSON.stringify({ message: userMessage, mode }),
       })
       .then(async (response) => {
         if (!response.ok) {
@@ -235,6 +236,11 @@ function App() {
                 onChange={(event) => setRepoLink(event.target.value)}
                 placeholder="Paste GitHub repo URL"
               />
+              <select value={mode} onChange={(e) => setMode(e.target.value)} style={{ marginRight: 8 }}>
+                <option value="local">Local (Ollama)</option>
+                <option value="external">External (Gemini)</option>
+              </select>
+
               <button type="button" onClick={startPipeline} disabled={phase === 'processing'}>
                 {phase === 'processing' ? 'Processing…' : 'Process repository'}
               </button>

@@ -1,3 +1,7 @@
+from bootstrap import ensure_repo_root
+
+ensure_repo_root()
+
 from vector_store.qdrant_client import QdrantManager
 
 client = QdrantManager().get_client()

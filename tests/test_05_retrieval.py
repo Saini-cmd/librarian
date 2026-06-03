@@ -1,3 +1,7 @@
+from bootstrap import ensure_repo_root
+
+ensure_repo_root()
+
 from retrieval.retrieval_pipeline import RetrievalPipeline
 from retrieval.query_expander import QueryExpander
 

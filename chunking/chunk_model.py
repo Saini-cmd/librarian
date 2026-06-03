@@ -22,3 +22,4 @@ class CodeChunk:
 
     # content
     content: str
+    summary: str = ""

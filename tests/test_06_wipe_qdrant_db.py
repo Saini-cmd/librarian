@@ -1,3 +1,7 @@
+from bootstrap import ensure_repo_root
+
+ensure_repo_root()
+
 from pathlib import Path
 import shutil
 

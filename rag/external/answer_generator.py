@@ -1,10 +1,10 @@
 import logging
 import re
 
-from rag.context_builder import ContextBuilder
-from rag.llm.ollama_client import OllamaClient
-from rag.prompt_builder import PromptBuilder
-from rag.types import AnswerResult, Citation, ContextAssembly, RetrievedChunk
+from rag.external.context_builder import ContextBuilder
+from rag.external.prompt_builder import PromptBuilder
+from rag.external.llm.gemini_client import GeminiClient
+from rag.types import AnswerResult, Citation, ContextAssembly, RetrievedChunk, LLMResponse
 
 
 logger = logging.getLogger(__name__)
@@ -12,17 +12,21 @@ _CITATION_PATTERN = re.compile(r"\[(C\d+)\]")
 
 
 class AnswerGenerator:
-    """End-to-end answer generator: context -> prompt -> LLM -> citation mapping."""
+    """External answer generator using hosted LLM (Gemini).
+
+    Matches the interface of `rag.local.answer_generator.AnswerGenerator` so callers
+    can swap implementations without changes.
+    """
 
     def __init__(
         self,
         context_builder: ContextBuilder | None = None,
         prompt_builder: PromptBuilder | None = None,
-        llm_client: OllamaClient | None = None,
+        llm_client: GeminiClient | None = None,
     ):
         self.context_builder = context_builder or ContextBuilder(max_chunks=8, token_budget=14000)
         self.prompt_builder = prompt_builder or PromptBuilder()
-        self.llm_client = llm_client or OllamaClient()
+        self.llm_client = llm_client or GeminiClient()
 
     def generate(
         self,
@@ -30,17 +34,17 @@ class AnswerGenerator:
         retrieved_chunks: list[RetrievedChunk | dict],
         stream: bool = False,
     ) -> AnswerResult:
-        logger.info("stage=answer_generation_start retrieved=%d", len(retrieved_chunks))
+        logger.info("stage=external_answer_generation_start retrieved=%d", len(retrieved_chunks))
 
         context = self.context_builder.build(retrieved_chunks)
         prompt_payload = self.prompt_builder.build(query=query, context=context)
-        llm_response = self.llm_client.generate(prompt_payload.messages, stream=stream)
+        llm_response: LLMResponse = self.llm_client.generate(prompt_payload.messages, stream=stream)
 
         citations = self._map_citations(llm_response.text, context)
         answer_text = self._append_citation_fallback(llm_response.text, citations)
 
         logger.info(
-            "stage=answer_generation_done context_chunks=%d citations=%d",
+            "stage=external_answer_generation_done context_chunks=%d citations=%d",
             len(context.chunks),
             len(citations),
         )
@@ -68,7 +72,6 @@ class AnswerGenerator:
             unique_ids = list(dict.fromkeys(citation_ids))
             return [context.citations[cid] for cid in unique_ids if cid in context.citations]
 
-        # Fallback for traceability: expose all context citations when model omitted inline references.
         return list(context.citations.values())
 
     @staticmethod

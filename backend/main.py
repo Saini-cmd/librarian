@@ -16,7 +16,7 @@ from chunking.chunk_pipeline import ChunkPipeline
 from embedding.embedding_pipeline import EmbeddingPipeline
 from ingestion.ingestion_pipeline import IngestionPipeline
 from retrieval.retrieval_pipeline import RetrievalPipeline
-from rag.answer_generator import AnswerGenerator
+from rag.local.answer_generator import AnswerGenerator
 
 app = FastAPI(title="Librarian AI API", version="0.1.0")
 
@@ -31,10 +31,12 @@ app.add_middleware(
 
 class ProcessRequest(BaseModel):
     repo_url: str = Field(..., min_length=1)
+    mode: str = Field(default="local", description="Answer mode: 'local' or 'external'")
 
 
 class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1)
+    mode: str | None = Field(default=None, description="Optional override: 'local' or 'external'")
 
 
 class ProcessResponse(BaseModel):
@@ -85,6 +87,9 @@ def process_repository(payload: ProcessRequest) -> ProcessResponse:
     APP_STATE.update({"progress": 70, "message": "Embedding chunks..."})
     embedder.embed_repo(repo_name)
 
+    # Remember the selected mode so subsequent /api/chat calls default to it.
+    APP_STATE.update({"mode": payload.mode})
+
     # Finalize
     APP_STATE.update({"phase": "ready", "progress": 100, "message": "Repository ingested and indexed.", "ready": True})
 
@@ -102,8 +107,10 @@ def chat(payload: ChatRequest) -> ChatResponse:
     # Run retrieval + answer generation synchronously for now.
     retriever = get_retrieval_pipeline()
     retrieved = retriever.retrieve(payload.message)
+    # Determine which generator to use: request override -> app state -> default local
+    desired_mode = payload.mode or APP_STATE.get("mode") or "local"
 
-    answer_gen = get_answer_generator()
+    answer_gen = get_answer_generator(mode=desired_mode)
     result = answer_gen.generate(query=payload.message, retrieved_chunks=retrieved, stream=False)
 
     return ChatResponse(answer=result.answer, citations=[asdict(c) for c in result.citations])
@@ -144,8 +151,15 @@ def get_retrieval_pipeline() -> RetrievalPipeline:
     return RetrievalPipeline(query_device=query_device, reranker_device=reranker_device)
 
 
-@lru_cache(maxsize=1)
-def get_answer_generator() -> AnswerGenerator:
+@lru_cache(maxsize=4)
+def get_answer_generator(mode: str = "local") -> AnswerGenerator:
+    mode = (mode or "local").strip().lower()
+    if mode == "external":
+        from rag.external.answer_generator import AnswerGenerator as ExternalAnswerGenerator
+
+        return ExternalAnswerGenerator()
+
+    # Default to local
     return AnswerGenerator()
 
 
