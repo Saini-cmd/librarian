@@ -1,5 +1,5 @@
 """External LLM clients namespace."""
 
-from rag.external.llm.gemini_client import GeminiClient, GeminiConfig
+from rag.external.llm.deepseek_client import DeepSeekClient, DeepSeekConfig
 
-__all__ = ["GeminiClient", "GeminiConfig"]
+__all__ = ["DeepSeekClient", "DeepSeekConfig"]

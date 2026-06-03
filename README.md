@@ -51,6 +51,19 @@ Make sure `ollama serve` is running and the model is installed before testing.
 - `python tests/test_06_wipe_qdrant_db.py` - clear the local Qdrant database
 - `python tests/test_07_answer_generation.py` - end-to-end retrieval + answer generation
 
+## Development
+
+Frontend hot-reloads through Vite.
+Backend hot-reloads when started with `--reload`.
+
+To start both from one command:
+
+```bash
+./dev.sh
+```
+
+This launches the API on port 8000 and the frontend on port 5173.
+
 ## Frontend
 
 The UI is now a React app under [`frontend/`](frontend).

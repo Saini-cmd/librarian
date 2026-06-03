@@ -12,6 +12,7 @@ import traceback
 from functools import lru_cache
 import logging
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from dataclasses import asdict
 from typing import List, Dict
@@ -19,59 +20,96 @@ from typing import List, Dict
 from chunking.ast_chunker import ASTChunker
 from chunking.chunk_model import CodeChunk
 from chunking.text_chunker import TextChunker
-from rag.external.llm.gemini_client import GeminiClient
+from rag.external.llm.deepseek_client import DeepSeekClient
 from rag.local.llm.local_summary_client import LocalSummaryClient
 from tqdm import tqdm
 
 
-SUMMARY_MAX_CHARS = int(os.getenv("GEMINI_SUMMARY_MAX_CHARS", "12000"))
+SUMMARY_MAX_CHARS = int(os.getenv("DEEPSEEK_SUMMARY_MAX_CHARS", "12000"))
+SUMMARY_BATCH_SIZE = int(os.getenv("DEEPSEEK_SUMMARY_BATCH_SIZE", "50"))
+SUMMARY_BATCH_WORKERS = int(os.getenv("DEEPSEEK_SUMMARY_BATCH_WORKERS", "8"))
 
 
 @lru_cache(maxsize=1)
-def _get_summary_client() -> GeminiClient:
+def _get_summary_client() -> DeepSeekClient:
     provider = os.getenv("SUMMARY_PROVIDER", "external").strip().lower()
     if provider == "local":
         return LocalSummaryClient()
-    return GeminiClient()
+    return DeepSeekClient()
 
 
 class ChunkPipeline:
 
     def __init__(self):
-        self.ast_chunker = ASTChunker()
-        self.text_chunker = TextChunker()
         self.summary_client = _get_summary_client()
         self._log = logging.getLogger(__name__)
+        self.ast_chunker = ASTChunker()
+        self.text_chunker = TextChunker()
 
     def chunk_repository(self, files_metadata: List[Dict], repo_name: str) -> List[CodeChunk]:
 
         all_chunks: List[CodeChunk] = []
+        files = list(files_metadata)
 
-        for i, file_metadata in enumerate(tqdm(files_metadata, desc="Chunking files")):
+        if not files:
+            self._save_chunks(repo_name, all_chunks)
+            return all_chunks
 
-            processing_type = file_metadata.get("processing_type", "text")
-            file_path = file_metadata.get("file_path", "unknown")
-            file_summary = self._summarize_file(file_metadata)
+        for batch_start in range(0, len(files), SUMMARY_BATCH_SIZE):
+            batch = files[batch_start:batch_start + SUMMARY_BATCH_SIZE]
+            batch_number = batch_start // SUMMARY_BATCH_SIZE + 1
+            summaries = self._summarize_files_batch(batch, batch_number=batch_number)
 
-            try:
-                if processing_type == "ast":
-                    chunks = self.ast_chunker.chunk_file(file_metadata)
-                    all_chunks.extend(chunks)
+            for index, file_metadata in enumerate(batch):
+                processing_type = file_metadata.get("processing_type", "text")
+                file_summary = summaries.get(index, "")
 
-                elif processing_type == "text":
-                    chunks = self.text_chunker.chunk_file(file_metadata)
-                    all_chunks.extend(chunks)
+                try:
+                    if processing_type == "ast":
+                        chunks = self.ast_chunker.chunk_file(file_metadata)
+                        all_chunks.extend(chunks)
 
-                for chunk in chunks:
-                    chunk.summary = file_summary
+                    elif processing_type == "text":
+                        chunks = self.text_chunker.chunk_file(file_metadata)
+                        all_chunks.extend(chunks)
 
-            except Exception:
-                traceback.print_exc()
-                continue
+                    for chunk in chunks:
+                        chunk.summary = file_summary
+
+                except Exception:
+                    traceback.print_exc()
+                    continue
 
         self._save_chunks(repo_name, all_chunks)
 
         return all_chunks
+
+    def _summarize_files_batch(self, files_batch: List[Dict], batch_number: int) -> dict[int, str]:
+        summaries: dict[int, str] = {}
+
+        if not files_batch:
+            return summaries
+
+        max_workers = max(1, min(SUMMARY_BATCH_WORKERS, len(files_batch)))
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {
+                executor.submit(self._summarize_file, file_metadata): index
+                for index, file_metadata in enumerate(files_batch)
+            }
+
+            try:
+                for future in tqdm(as_completed(futures), total=len(futures), desc=f"Summaries batch {batch_number}"):
+                    index = futures[future]
+                    try:
+                        summaries[index] = future.result()
+                    except Exception:
+                        summaries[index] = ""
+            except KeyboardInterrupt:
+                for future in futures:
+                    future.cancel()
+                raise
+
+        return summaries
 
     def _save_chunks(self, repo_name: str, chunks: List[CodeChunk]):
 
@@ -117,16 +155,25 @@ class ChunkPipeline:
         relative_path = file_metadata.get("file_path", file_path)
 
         instruction = (
-            "Summarize this source file in about 100 words. "
-            "Focus on the file's purpose, major components, and notable behavior. "
-            "Keep the summary concise and useful for code search and QA."
+            """Analyze the following source code and produce a retrieval-optimized summary in no more than 100 words.
+
+Include:
+- File purpose.
+- Main classes, functions, and exported symbols.
+- Business logic and responsibilities.
+- External services, APIs, databases, or frameworks referenced.
+- Key concepts a developer might search for when looking for this file.
+
+Output only the summary text.
+Maximum 100 words.
+"""
         )
 
         prompt = f"File: {relative_path}\nLanguage: {language}\n\n{content}"
 
         # Synchronous retry loop on rate-limit errors. Configurable via env vars:
-        max_retries = int(os.getenv("GEMINI_SUMMARY_RATE_LIMIT_RETRIES", "5"))
-        wait_seconds = int(os.getenv("GEMINI_RATE_LIMIT_WAIT_SECONDS", "60"))
+        max_retries = int(os.getenv("DEEPSEEK_SUMMARY_RATE_LIMIT_RETRIES", "5"))
+        wait_seconds = int(os.getenv("DEEPSEEK_SUMMARY_RATE_LIMIT_WAIT_SECONDS", "60"))
 
         attempts = 0
         while True:

@@ -3,7 +3,7 @@ import re
 
 from rag.external.context_builder import ContextBuilder
 from rag.external.prompt_builder import PromptBuilder
-from rag.external.llm.gemini_client import GeminiClient
+from rag.external.llm.deepseek_client import DeepSeekClient
 from rag.types import AnswerResult, Citation, ContextAssembly, RetrievedChunk, LLMResponse
 
 
@@ -12,7 +12,7 @@ _CITATION_PATTERN = re.compile(r"\[(C\d+)\]")
 
 
 class AnswerGenerator:
-    """External answer generator using hosted LLM (Gemini).
+    """External answer generator using hosted LLM (DeepSeek).
 
     Matches the interface of `rag.local.answer_generator.AnswerGenerator` so callers
     can swap implementations without changes.
@@ -22,11 +22,11 @@ class AnswerGenerator:
         self,
         context_builder: ContextBuilder | None = None,
         prompt_builder: PromptBuilder | None = None,
-        llm_client: GeminiClient | None = None,
+        llm_client: DeepSeekClient | None = None,
     ):
         self.context_builder = context_builder or ContextBuilder(max_chunks=8, token_budget=14000)
         self.prompt_builder = prompt_builder or PromptBuilder()
-        self.llm_client = llm_client or GeminiClient()
+        self.llm_client = llm_client or DeepSeekClient()
 
     def generate(
         self,

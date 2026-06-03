@@ -1,5 +1,5 @@
-"""External LLM pipeline namespace (Gemini and other hosted providers)."""
+"""External LLM pipeline namespace (DeepSeek and other hosted providers)."""
 
-from rag.external.llm import GeminiClient, GeminiConfig
+from rag.external.llm import DeepSeekClient, DeepSeekConfig
 
-__all__ = ["GeminiClient", "GeminiConfig"]
+__all__ = ["DeepSeekClient", "DeepSeekConfig"]

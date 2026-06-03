@@ -10,6 +10,7 @@ Handles:
 
 import os
 import pickle
+from functools import lru_cache
 from pathlib import Path
 from typing import List
 
@@ -24,10 +25,15 @@ CHUNKS_DIR = Path("data/chunks")
 COLLECTION_NAME = "code_chunks"
 
 
+@lru_cache(maxsize=1)
+def get_embedder() -> Embedder:
+    return Embedder()
+
+
 class EmbeddingPipeline:
 
     def __init__(self):
-        self.embedder = Embedder()
+        self.embedder = get_embedder()
         self.indexer = VectorIndexer(
             collection_name=COLLECTION_NAME,
             embedding_dim=self.embedder.embedding_dim

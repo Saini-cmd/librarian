@@ -122,7 +122,7 @@ class OllamaClient:
 
     @staticmethod
     def _parse_stream_line(line: str) -> dict | None:
-        text = line.strip()
+        text = line.rstrip("\r")
         if not text:
             return None
         try:

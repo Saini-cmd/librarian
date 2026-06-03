@@ -1,4 +1,6 @@
 import { useMemo, useState, useEffect, useRef } from 'react';
+import { marked } from 'marked';
+import DOMPurify from 'dompurify';
 
 const stages = [
   { key: 'ingest', label: 'Ingesting repo' },
@@ -16,9 +18,14 @@ const sampleMessages = [
   },
 ];
 
+function renderMarkdown(content) {
+  return DOMPurify.sanitize(marked.parse(content || ''));
+}
+
 function App() {
   const [repoLink, setRepoLink] = useState('');
   const [mode, setMode] = useState('local');
+  const [wipeDb, setWipeDb] = useState(false);
   const [phase, setPhase] = useState('idle');
   const [statusText, setStatusText] = useState('Paste a repository link to begin.');
   const [progress, setProgress] = useState(0);
@@ -58,7 +65,7 @@ function App() {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ repo_url: repoLink.trim(), mode }),
+        body: JSON.stringify({ repo_url: repoLink.trim(), mode, wipe_db: wipeDb }),
       })
       .then(async (response) => {
         if (!response.ok) {
@@ -152,39 +159,68 @@ function App() {
     const userMessage = draft.trim();
     setMessages((current) => [...current, { id: Date.now(), role: 'user', content: userMessage }]);
     setDraft('');
+    // Start streaming endpoint which returns SSE-style data: events.
+    const placeholderId = Date.now() + 1;
+    setMessages((current) => [...current, { id: placeholderId, role: 'assistant', content: '' }]);
 
-    window
-      .fetch('/api/chat', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ message: userMessage, mode }),
-      })
-      .then(async (response) => {
-        if (!response.ok) {
-          const errorText = await response.text();
-          throw new Error(errorText || 'Chat request failed');
+    (async () => {
+      try {
+        const res = await fetch('/api/chat/stream', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: userMessage, mode }),
+        });
+
+        if (!res.ok || !res.body) {
+          const text = await res.text();
+          throw new Error(text || 'Streaming chat failed');
         }
 
-        return response.json();
-      })
-      .then((data) => {
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let done = false;
+        let buffer = '';
+        let assembled = '';
+
+        while (!done) {
+          const { value, done: readerDone } = await reader.read();
+          done = readerDone;
+          if (value) {
+            buffer += decoder.decode(value, { stream: true });
+
+            // SSE-style: events separated by double newline. Each event may contain lines 'data: <payload>'.
+            let parts = buffer.split('\n\n');
+            buffer = parts.pop(); // leftover
+
+            for (const part of parts) {
+              const lines = part.split('\n');
+              for (const line of lines) {
+                if (!line) continue;
+                if (line.startsWith('data:')) {
+                  const payload = line.slice(5).trim();
+                  const event = payload ? JSON.parse(payload) : {};
+                  if (event.done) {
+                    done = true;
+                    break;
+                  }
+                  if (typeof event.token === 'string') {
+                    assembled += event.token;
+                    setMessages((current) => current.map((m) => (m.id === placeholderId ? { ...m, content: assembled } : m)));
+                  }
+                }
+              }
+            }
+          }
+        }
+
+        // Reader done; final render ensured
+      } catch (err) {
         setMessages((current) => [
           ...current,
-          { id: Date.now() + 1, role: 'assistant', content: data.answer },
+          { id: Date.now() + 2, role: 'assistant', content: `Chat failed: ${err.message}` },
         ]);
-      })
-      .catch((error) => {
-        setMessages((current) => [
-          ...current,
-          {
-            id: Date.now() + 1,
-            role: 'assistant',
-            content: `Chat failed: ${error.message}`,
-          },
-        ]);
-      });
+      }
+    })();
   };
 
   return (
@@ -203,7 +239,11 @@ function App() {
             <div className="chat-stream">
               {messages.map((message) => (
                 <div key={message.id} className={`message message-${message.role}`}>
-                  {message.content}
+                  {message.role === 'assistant' ? (
+                    <div dangerouslySetInnerHTML={{ __html: renderMarkdown(message.content) }} />
+                  ) : (
+                    <div>{message.content}</div>
+                  )}
                 </div>
               ))}
             </div>
@@ -238,8 +278,17 @@ function App() {
               />
               <select value={mode} onChange={(e) => setMode(e.target.value)} style={{ marginRight: 8 }}>
                 <option value="local">Local (Ollama)</option>
-                <option value="external">External (Gemini)</option>
+                <option value="external">External (DeepSeek)</option>
               </select>
+              <label style={{ marginRight: 8 }}>
+                <input
+                  type="checkbox"
+                  checked={wipeDb}
+                  onChange={(e) => setWipeDb(e.target.checked)}
+                  style={{ marginRight: 6 }}
+                />
+                Wipe DB
+              </label>
 
               <button type="button" onClick={startPipeline} disabled={phase === 'processing'}>
                 {phase === 'processing' ? 'Processing…' : 'Process repository'}
