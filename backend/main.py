@@ -80,6 +80,7 @@ def health() -> dict[str, str]:
 def process_repository(payload: ProcessRequest) -> ProcessResponse:
     repo_name = _repo_name_from_url(payload.repo_url)
 
+    # Check if already indexed and not forcing a wipe
     if not payload.wipe_db and _repo_marker_matches(repo_name):
         APP_STATE.update({
             "phase": "ready",
@@ -98,10 +99,18 @@ def process_repository(payload: ProcessRequest) -> ProcessResponse:
             message="Repository already indexed. Reusing existing chunks and embeddings.",
         )
 
-    # Reset previous repository state so the next chat only sees the new repo.
-    _reset_index_state(payload.wipe_db)
-
+    # Only reset if we're actually going to process a new repo
+    # Also, only wipe if payload.wipe_db is True (not just reset state)
+    if payload.wipe_db:
+        _reset_index_state(wipe=True)
+    else:
+        # For non-wipe but new repo, just reset the state but keep existing data?
+        # Actually, we need to clear APP_STATE for the new repo
+        APP_STATE.update({"phase": "processing", "progress": 0, "message": "Processing new repository...", "ready": False})
+    
+    # The rest of your processing code...
     embedding_future = prime_embedding_pipeline()
+    # ... rest of the function
 
     # Update state: starting
     APP_STATE.update({"phase": "processing", "progress": 5, "message": "Starting ingestion...", "ready": False})
@@ -316,11 +325,11 @@ def _repo_marker_matches(repo_name: str) -> bool:
         return False
 
     try:
-        marker_text = REPO_MARKER_FILE.read_text(encoding="utf-8")
+        marker_text = REPO_MARKER_FILE.read_text(encoding="utf-8").strip()
+        # Exact match, not substring
+        if marker_text != repo_name:
+            return False
     except Exception:
-        return False
-
-    if repo_name not in marker_text:
         return False
 
     return _collection_exists("code_chunks")
@@ -358,7 +367,8 @@ def _write_index_state(repo_name: str, files_discovered: int, chunks_created: in
 def _write_repo_marker(repo_name: str) -> None:
     try:
         REPO_MARKER_FILE.parent.mkdir(parents=True, exist_ok=True)
-        REPO_MARKER_FILE.write_text(repo_name, encoding="utf-8")
+        # Write exactly the repo name with no extra whitespace
+        REPO_MARKER_FILE.write_text(repo_name.strip(), encoding="utf-8")
     except Exception:
         pass
 

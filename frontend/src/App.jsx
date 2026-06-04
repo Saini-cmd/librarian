@@ -45,13 +45,42 @@ function App() {
     return null;
   }, [phase, progress]);
 
-  const startPipeline = () => {
+  const startPipeline = async () => {
     if (phase === 'processing') return;
 
     if (!repoLink.trim()) {
       setStatusText('Paste a repository link first.');
       return;
     }
+
+
+
+try {
+    const statusRes = await fetch('/api/status');
+    const statusData = await statusRes.json();
+    
+    // If backend says it's ready and indexed_repo_name matches current repo
+    if (statusData.ready && statusData.indexed_repo_name === extractRepoName(repoLink)) {
+      setPhase('ready');
+      setChatEnabled(true);
+      setStatusText('Repository already indexed — you can ask questions now.');
+      setMessages((current) => [
+        ...current,
+        {
+          id: Date.now(),
+          role: 'assistant',
+          content: 'The repository is already indexed and ready. Ask me anything about the codebase.',
+        },
+      ]);
+      return; // Don't send process request again
+    }
+  } catch (err) {
+    // If status check fails, continue with processing
+    console.log('Status check failed, proceeding with processing');
+  }
+
+
+
 
     setPhase('processing');
     setChatEnabled(false);
@@ -96,6 +125,11 @@ function App() {
     // begin polling status endpoint to update progress/stage
     startPollingStatus();
   };
+
+  const extractRepoName = (url) => {
+  const parsed = url.replace(/\.git$/, '').split('/').pop();
+  return parsed || 'repo';
+};
 
   const pollRef = useRef(null);
 

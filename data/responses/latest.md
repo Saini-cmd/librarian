@@ -3,19 +3,17 @@
 - Mode: external
 
 ## Question
-what are the page styling options available to the user?
+tell me about the schema and database used in the project in tabular form
 
 ## Answer
-Based on the code in `app/api/designs/route.js`, the repository defines a default set of page styling options for user customization. These options cover visual appearance and layout choices [C1]:
+Based on the provided code excerpts, the project uses **MongoDB** as its database, accessed via a custom `connectDB` helper (`@/lib/mongodb`). The data model is defined in `@/models/Design` (imported as `Design`). Although the full model file is not shown, the code reveals the structure through usage.
 
-- **theme** – A DaisyUI or Tailwind theme (e.g., `"lemonade"`)
-- **font** – Font family selection (e.g., `"inter"`)
-- **size** – Base size or scale (numeric, e.g., `2`)
-- **radius** – Corner rounding level (numeric, e.g., `2`)
-- **border** – Border style (e.g., `"none"`)
-- **avatar** – Avatar shape/style (e.g., `"rounded-xl"`)
-- **background** – Background color or style (e.g., `"bg-primary"`)
-- **buttonStyle** – Button variant (e.g., `"btn btn btn-accent"`)
-- **buttonRadius** – Button corner rounding (e.g., `"rounded"`)
+| Aspect | Details |
+|--------|---------|
+| **Database** | MongoDB (NoSQL) |
+| **Connection** | `connectDB()` from `@/lib/mongodb` |
+| **Model** | `Design` (Mongoose model) |
+| **Schema fields (inferred)** | `clerkUserId` (String, used for user lookup)<br>`customization` (Object, stores design settings) |
+| **Customization object fields** | `theme` (string, default `"lemonade"`)<br>`font` (string, default `"inter"`)<br>`size` (number, default `2`)<br>`radius` (number, default `2`)<br>`border` (string, default `"none"`)<br>`avatar` (string, default `"rounded-xl"`)<br>`background` (string, default `"bg-primary"`)<br>`buttonStyle` (string, default `"btn btn btn-accent"`)<br>`buttonRadius` (string, default `"rounded"`) |
 
-These values represent the initial or fallback design configuration that users can modify via the API (likely through a design settings interface). The actual customization options exposed to the user would correspond to these properties, allowing control over theme, typography, sizing, borders, avatar styling, background, and button appearance.
+The `defaultDesign` object in `route.js` ([C2]) likely mirrors the expected shape of the `customization` sub-document in the MongoDB collection. The `Design.findOne({ clerkUserId: userId })` query implies that `clerkUserId` is indexed or at least used as a lookup field.
