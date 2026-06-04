@@ -16,7 +16,7 @@ from rag.types import LLMResponse
 logger = logging.getLogger(__name__)
 
 load_dotenv()
-
+DEBUG_PROMPTS = os.getenv("DEBUG_PROMPTS", "true").lower() == "true"
 
 @dataclass(frozen=True)
 class DeepSeekConfig:
@@ -49,6 +49,20 @@ class DeepSeekClient:
         self.chat_url = f"{self.base_url}/chat/completions"
 
     def generate(self, messages: list[dict[str, str]], stream: bool = False) -> LLMResponse:
+
+        if DEBUG_PROMPTS:
+            print("\n" + "🌊" * 40)
+            print("DEEPSEEK API CALL")
+            print("🌊" * 40)
+            print(f"Stream mode: {stream}")
+            print(f"Number of messages: {len(messages)}")
+            print("\n--- LAST 1000 CHARS OF LAST MESSAGE ---")
+            last_message = messages[-1]["content"] if messages else ""
+            print(last_message[-1000:] if len(last_message) > 1000 else last_message)
+            print("🌊" * 40 + "\n")
+
+
+
         if stream:
             chunks = []
             for token in self.stream_generate(messages):

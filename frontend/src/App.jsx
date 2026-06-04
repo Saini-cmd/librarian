@@ -1,260 +1,367 @@
-import { useMemo, useState, useEffect, useRef } from 'react';
-import { marked } from 'marked';
-import DOMPurify from 'dompurify';
+
+import { useMemo, useState, useEffect, useRef, useCallback } from "react";
+import { marked } from "marked";
+import DOMPurify from "dompurify";
 
 const stages = [
-  { key: 'ingest', label: 'Ingesting repo' },
-  { key: 'scan', label: 'Scanning files' },
-  { key: 'chunk', label: 'Chunking code' },
-  { key: 'embed', label: 'Embedding chunks' },
-  { key: 'ready', label: 'Ready for chat' },
+  { key: "ingest", label: "Ingesting repo" },
+  { key: "scan", label: "Scanning files" },
+  { key: "chunk", label: "Chunking code" },
+  { key: "embed", label: "Embedding chunks" },
+  { key: "ready", label: "Ready for chat" },
 ];
 
-const sampleMessages = [
-  {
-    id: 1,
-    role: 'assistant',
-    content: 'Run the pipeline first. I will unlock the chat panel once the repository has been processed.',
-  },
-];
+// Helper to render markdown — works with marked v4 (sync) and v5+ (async)
+const useMarkdown = (content) => {
+  const [html, setHtml] = useState("");
+  useEffect(() => {
+    let mounted = true;
+    try {
+      const result = marked.parse(content || "", { mangle: false, headerIds: false });
+      if (result && typeof result.then === "function") {
+        result
+          .then((parsed) => { if (mounted) setHtml(DOMPurify.sanitize(parsed)); })
+          .catch(() => { if (mounted) setHtml(DOMPurify.sanitize(content || "")); });
+      } else {
+        if (mounted) setHtml(DOMPurify.sanitize(result));
+      }
+    } catch (err) {
+      console.error("Markdown parsing error:", err);
+      if (mounted) setHtml(DOMPurify.sanitize(content || ""));
+    }
+    return () => { mounted = false; };
+  }, [content]);
+  return html;
+};
 
-function renderMarkdown(content) {
-  return DOMPurify.sanitize(marked.parse(content || ''));
-}
+// Helper to extract repo name from URL
+const extractRepoName = (url) => {
+  const parsed = url.replace(/\.git$/, "").split("/").pop();
+  return parsed || "repo";
+};
 
 function App() {
-  const [repoLink, setRepoLink] = useState('');
-  const [mode, setMode] = useState('local');
-  const [wipeDb, setWipeDb] = useState(false);
-  const [phase, setPhase] = useState('idle');
-  const [statusText, setStatusText] = useState('Paste a repository link to begin.');
+  const [repoLink, setRepoLink] = useState("");
+  const [mode, setMode] = useState("local");
+  const [phase, setPhase] = useState("idle");
+  const [statusText, setStatusText] = useState(
+    "Paste a repository link to begin."
+  );
   const [progress, setProgress] = useState(0);
   const [chatEnabled, setChatEnabled] = useState(false);
-  const [messages, setMessages] = useState(sampleMessages);
-  const [draft, setDraft] = useState('');
+  const [messages, setMessages] = useState([]);
+  const [draft, setDraft] = useState("");
+  const pollRef = useRef(null);
+  const abortControllerRef = useRef(null);
 
   const currentStage = useMemo(() => {
-    if (phase === 'processing') {
+    if (phase === "processing") {
       if (progress < 20) return stages[0];
       if (progress < 40) return stages[1];
       if (progress < 70) return stages[2];
       if (progress < 100) return stages[3];
     }
-
-    if (phase === 'ready') return stages[4];
+    if (phase === "ready") return stages[4];
     return null;
   }, [phase, progress]);
 
-  const startPipeline = async () => {
-    if (phase === 'processing') return;
-
-    if (!repoLink.trim()) {
-      setStatusText('Paste a repository link first.');
-      return;
-    }
-
-
-
-try {
-    const statusRes = await fetch('/api/status');
-    const statusData = await statusRes.json();
-    
-    // If backend says it's ready and indexed_repo_name matches current repo
-    if (statusData.ready && statusData.indexed_repo_name === extractRepoName(repoLink)) {
-      setPhase('ready');
-      setChatEnabled(true);
-      setStatusText('Repository already indexed — you can ask questions now.');
-      setMessages((current) => [
-        ...current,
-        {
-          id: Date.now(),
-          role: 'assistant',
-          content: 'The repository is already indexed and ready. Ask me anything about the codebase.',
-        },
-      ]);
-      return; // Don't send process request again
-    }
-  } catch (err) {
-    // If status check fails, continue with processing
-    console.log('Status check failed, proceeding with processing');
-  }
-
-
-
-
-    setPhase('processing');
-    setChatEnabled(false);
-    setProgress(6);
-    setStatusText('Starting pipeline — cloning repository...');
-
-    // Start server-side processing
-    window
-      .fetch('/api/process', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ repo_url: repoLink.trim(), mode, wipe_db: wipeDb }),
-      })
-      .then(async (response) => {
-        if (!response.ok) {
-          const errorText = await response.text();
-          throw new Error(errorText || 'Pipeline request failed');
-        }
-
-        return response.json();
-      })
-      .then((data) => {
-        // server accepted and will process; rely on /api/status polling for readiness
-        setStatusText(data.message || 'Repository processing started.');
-      })
-      .catch((error) => {
-        setPhase('idle');
-        setProgress(0);
-        setStatusText(`Pipeline failed to start: ${error.message}`);
-        setMessages((current) => [
-          ...current,
-          {
-            id: Date.now(),
-            role: 'assistant',
-            content: 'Pipeline failed to start. Please check the backend and try again.',
-          },
-        ]);
-      });
-
-    // begin polling status endpoint to update progress/stage
-    startPollingStatus();
-  };
-
-  const extractRepoName = (url) => {
-  const parsed = url.replace(/\.git$/, '').split('/').pop();
-  return parsed || 'repo';
-};
-
-  const pollRef = useRef(null);
-
-  const startPollingStatus = () => {
-    if (pollRef.current) return;
-
-    pollRef.current = window.setInterval(async () => {
-      try {
-        const res = await fetch('/api/status');
-        if (!res.ok) throw new Error('Status fetch failed');
-        const data = await res.json();
-
-        // Interpret server response if it provides helpful fields
-        if (data.progress !== undefined) setProgress(data.progress);
-        if (data.stage) setStatusText(data.stage);
-
-        // Fallback gentle progress when no numeric progress provided
-        if (data.progress === undefined) {
-          setProgress((p) => Math.min(98, Math.max(p + 4, 12)));
-        }
-
-        // Only the backend's ready flag should unlock chat.
-        const ready = data.ready === true || data.phase === 'ready';
-        if (ready) {
-          window.clearInterval(pollRef.current);
-          pollRef.current = null;
-          setProgress(100);
-          setPhase('ready');
-          setChatEnabled(true);
-          setStatusText(data.message || 'Repository ready — you can ask questions now.');
-          setMessages((current) => [
-            ...current,
-            {
-              id: Date.now(),
-              role: 'assistant',
-              content: 'The repository is ready. Ask me anything about the codebase.',
-            },
-          ]);
-        }
-      } catch (err) {
-        // polling errors — show a gentle note but keep trying
-        setStatusText((s) => (s.includes('failed') ? s : 'Processing — awaiting backend updates...'));
-        setProgress((p) => Math.min(96, p + 2));
-      }
-    }, 1000);
-  };
-
+  // Cleanup polling and streaming on unmount
   useEffect(() => {
     return () => {
-      if (pollRef.current) {
-        window.clearInterval(pollRef.current);
-        pollRef.current = null;
-      }
+      if (pollRef.current) clearInterval(pollRef.current);
+      if (abortControllerRef.current) abortControllerRef.current.abort();
     };
   }, []);
 
-  const submitMessage = (event) => {
+  const stopPolling = useCallback(() => {
+    if (pollRef.current) {
+      clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+  }, []);
+
+const startPollingStatus = useCallback(() => {
+  if (pollRef.current) stopPolling();
+
+  pollRef.current = setInterval(async () => {
+    try {
+      const res = await fetch("/api/status");
+      if (!res.ok) throw new Error("Status fetch failed");
+      const data = await res.json();
+
+      // Debug logging - remove in production
+      console.log("Status response:", data);
+
+      // More robust status detection
+      const isReady = 
+        data.ready === true || 
+        data.phase === "ready" || 
+        data.status === "ready" ||
+        data.state === "ready" ||
+        (data.progress === 100 && data.complete === true);
+
+      // Update progress based on what backend provides
+      if (typeof data.progress === "number") {
+        setProgress(data.progress);
+      } else if (data.progress_percentage) {
+        setProgress(data.progress_percentage);
+      }
+
+      // Update status text
+      if (data.stage) setStatusText(data.stage);
+      else if (data.message) setStatusText(data.message);
+      else if (data.status) setStatusText(data.status);
+
+      if (isReady) {
+        console.log("Backend reports ready, stopping polling and enabling chat");
+        stopPolling();
+        setProgress(100);
+        setPhase("ready");
+        setChatEnabled(true);
+        
+        const statusMessage = data.message || 
+                             data.status_message || 
+                             "Repository ready — you can ask questions now.";
+        setStatusText(statusMessage);
+
+        // Force add welcome message if chat is empty or doesn't have assistant message
+        setMessages((prev) => {
+          // Check if any assistant message exists
+          const hasAssistantMessage = prev.some((m) => m.role === "assistant");
+          
+          if (!hasAssistantMessage) {
+            return [
+              ...prev,
+              {
+                id: Date.now(),
+                role: "assistant",
+                content: "The repository is ready. Ask me anything about the codebase.",
+              },
+            ];
+          }
+          return prev;
+        });
+        
+        // Important: Force re-render by triggering state update
+        // This ensures the UI switches to chat view
+        setMessages(prev => [...prev]); // This triggers a re-render
+      }
+    } catch (err) {
+      console.error("Status polling error:", err);
+      setStatusText((s) =>
+        s.includes("failed") ? s : "Processing — awaiting backend updates..."
+      );
+      // Only advance progress if not already high
+      setProgress((p) => Math.min(96, p + 2));
+    }
+  }, 2000); // Increased to 2 seconds to reduce load
+}, [stopPolling]);
+
+const startPipeline = async () => {
+  if (phase === "processing") return;
+  if (!repoLink.trim()) {
+    setStatusText("Paste a repository link first.");
+    return;
+  }
+
+  // Check if repo is already indexed
+  try {
+    const statusRes = await fetch("/api/status");
+    const statusData = await statusRes.json();
+    
+    console.log("Status check before processing:", statusData);
+    
+    // More robust check for existing repo
+    const isAlreadyReady = 
+      statusData.ready === true || 
+      statusData.phase === "ready" ||
+      statusData.state === "ready";
+      
+    const repoName = extractRepoName(repoLink);
+    const isCorrectRepo = statusData.indexed_repo_name === repoName ||
+                          statusData.repo_name === repoName ||
+                          statusData.repository === repoName;
+    
+    if (isAlreadyReady && isCorrectRepo) {
+      console.log("Repo already indexed, skipping processing");
+      setPhase("ready");
+      setChatEnabled(true);
+      setProgress(100);
+      setStatusText("Repository already indexed — you can ask questions now.");
+      
+      setMessages((prev) => {
+        const hasAssistantMessage = prev.some((m) => m.role === "assistant");
+        if (!hasAssistantMessage) {
+          return [
+            ...prev,
+            {
+              id: Date.now(),
+              role: "assistant",
+              content: "The repository is already indexed and ready. Ask me anything about the codebase.",
+            },
+          ];
+        }
+        return prev;
+      });
+      return;
+    }
+  } catch (err) {
+    console.log("Status check failed, proceeding with processing:", err);
+  }
+
+  // Reset chat before new processing
+  setMessages([]); // Clear old messages
+  setPhase("processing");
+  setChatEnabled(false);
+  setProgress(5);
+  setStatusText("Starting pipeline — cloning repository...");
+
+  try {
+    const response = await fetch("/api/process", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        repo_url: repoLink.trim(),
+        mode,
+      }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(errorText || "Pipeline request failed");
+    }
+
+    const data = await response.json();
+    console.log("Process response:", data);
+    setStatusText(data.message || "Repository processing started.");
+    startPollingStatus();
+  } catch (error) {
+    console.error("Pipeline error:", error);
+    setPhase("idle");
+    setProgress(0);
+    setStatusText(`Pipeline failed to start: ${error.message}`);
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: Date.now(),
+        role: "assistant",
+        content: `Pipeline failed to start. Please check the backend and try again.\n\nError: ${error.message}`,
+      },
+    ]);
+  }
+};
+
+  const submitMessage = async (event) => {
     event.preventDefault();
-    if (!draft.trim()) return;
+    if (!draft.trim() || !chatEnabled) return;
 
     const userMessage = draft.trim();
-    setMessages((current) => [...current, { id: Date.now(), role: 'user', content: userMessage }]);
-    setDraft('');
-    // Start streaming endpoint which returns SSE-style data: events.
+    setMessages((prev) => [
+      ...prev,
+      { id: Date.now(), role: "user", content: userMessage },
+    ]);
+    setDraft("");
+
     const placeholderId = Date.now() + 1;
-    setMessages((current) => [...current, { id: placeholderId, role: 'assistant', content: '' }]);
+    setMessages((prev) => [
+      ...prev,
+      { id: placeholderId, role: "assistant", content: "" },
+    ]);
 
-    (async () => {
-      try {
-        const res = await fetch('/api/chat/stream', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ message: userMessage, mode }),
-        });
+    // Abort previous streaming if any
+    if (abortControllerRef.current) abortControllerRef.current.abort();
+    abortControllerRef.current = new AbortController();
 
-        if (!res.ok || !res.body) {
-          const text = await res.text();
-          throw new Error(text || 'Streaming chat failed');
-        }
+    try {
+      const res = await fetch("/api/chat/stream", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: userMessage, mode }),
+        signal: abortControllerRef.current.signal,
+      });
 
-        const reader = res.body.getReader();
-        const decoder = new TextDecoder();
-        let done = false;
-        let buffer = '';
-        let assembled = '';
+      if (!res.ok || !res.body) {
+        const text = await res.text();
+        throw new Error(text || "Streaming chat failed");
+      }
 
-        while (!done) {
-          const { value, done: readerDone } = await reader.read();
-          done = readerDone;
-          if (value) {
-            buffer += decoder.decode(value, { stream: true });
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let assembled = "";
+      let doneStream = false;
 
-            // SSE-style: events separated by double newline. Each event may contain lines 'data: <payload>'.
-            let parts = buffer.split('\n\n');
-            buffer = parts.pop(); // leftover
+      while (!doneStream) {
+        const { value, done } = await reader.read();
+        doneStream = done;
+        if (value) {
+          buffer += decoder.decode(value, { stream: true });
+          // split by double newline (SSE standard)
+          const parts = buffer.split("\n\n");
+          buffer = parts.pop();
 
-            for (const part of parts) {
-              const lines = part.split('\n');
-              for (const line of lines) {
-                if (!line) continue;
-                if (line.startsWith('data:')) {
-                  const payload = line.slice(5).trim();
-                  const event = payload ? JSON.parse(payload) : {};
+          for (const part of parts) {
+            const lines = part.split("\n");
+            for (const line of lines) {
+              if (line.startsWith("data:")) {
+                const payload = line.slice(5).trim();
+                if (payload === "[DONE]") {
+                  doneStream = true;
+                  break;
+                }
+                try {
+                  const event = JSON.parse(payload);
                   if (event.done) {
-                    done = true;
+                    doneStream = true;
                     break;
                   }
-                  if (typeof event.token === 'string') {
+                  if (typeof event.token === "string") {
                     assembled += event.token;
-                    setMessages((current) => current.map((m) => (m.id === placeholderId ? { ...m, content: assembled } : m)));
+                    setMessages((prev) =>
+                      prev.map((msg) =>
+                        msg.id === placeholderId
+                          ? { ...msg, content: assembled }
+                          : msg
+                      )
+                    );
                   }
+                } catch (e) {
+                  console.warn("Failed to parse SSE event:", payload);
                 }
               }
             }
           }
         }
-
-        // Reader done; final render ensured
-      } catch (err) {
-        setMessages((current) => [
-          ...current,
-          { id: Date.now() + 2, role: 'assistant', content: `Chat failed: ${err.message}` },
-        ]);
       }
-    })();
+    } catch (err) {
+      if (err.name === "AbortError") {
+        console.log("Streaming aborted");
+        return;
+      }
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: Date.now() + 2,
+          role: "assistant",
+          content: `Chat failed: ${err.message}`,
+        },
+      ]);
+      // Remove the placeholder if it's still empty
+      setMessages((prev) =>
+        prev.filter((msg) => msg.id !== placeholderId || msg.content)
+      );
+    } finally {
+      abortControllerRef.current = null;
+    }
+  };
+
+  // Markdown-aware message component
+  const MessageContent = ({ role, content }) => {
+    const html = useMarkdown(role === "assistant" ? content : "");
+    if (role === "assistant") {
+      return <div dangerouslySetInnerHTML={{ __html: html }} />;
+    }
+    return <div>{content}</div>;
   };
 
   return (
@@ -263,21 +370,27 @@ try {
       <div className="bg-orb bg-orb-two" />
 
       <main className="layout">
-        {phase === 'ready' ? (
-          <section className={`screen-panel chat-panel ${chatEnabled ? 'chat-panel-ready' : 'chat-panel-disabled'}`}>
+        {phase === "ready" ? (
+          <section
+            className={`screen-panel chat-panel ${
+              chatEnabled ? "chat-panel-ready" : "chat-panel-disabled"
+            }`}
+          >
             <div className="chat-header">
               <h2>Chat</h2>
-              <span>{chatEnabled ? 'Ready' : 'Waiting for processing'}</span>
+              <span>{chatEnabled ? "Ready" : "Waiting for processing"}</span>
             </div>
 
             <div className="chat-stream">
               {messages.map((message) => (
-                <div key={message.id} className={`message message-${message.role}`}>
-                  {message.role === 'assistant' ? (
-                    <div dangerouslySetInnerHTML={{ __html: renderMarkdown(message.content) }} />
-                  ) : (
-                    <div>{message.content}</div>
-                  )}
+                <div
+                  key={message.id}
+                  className={`message message-${message.role}`}
+                >
+                  <MessageContent
+                    role={message.role}
+                    content={message.content}
+                  />
                 </div>
               ))}
             </div>
@@ -286,8 +399,12 @@ try {
               <input
                 disabled={!chatEnabled}
                 value={draft}
-                onChange={(event) => setDraft(event.target.value)}
-                placeholder={chatEnabled ? 'Ask about the repository...' : 'Processing must complete first'}
+                onChange={(e) => setDraft(e.target.value)}
+                placeholder={
+                  chatEnabled
+                    ? "Ask about the repository..."
+                    : "Processing must complete first"
+                }
               />
               <button type="submit" disabled={!chatEnabled}>
                 Send
@@ -299,7 +416,8 @@ try {
             <div className="brand-block">
               <h1>Librarian AI</h1>
               <p>
-                Unleash the power of AI to navigate and understand your codebase like never before!
+                Unleash the power of AI to navigate and understand your codebase
+                like never before!
               </p>
             </div>
 
@@ -307,37 +425,43 @@ try {
               <input
                 id="repo-link"
                 value={repoLink}
-                onChange={(event) => setRepoLink(event.target.value)}
+                onChange={(e) => setRepoLink(e.target.value)}
                 placeholder="Paste GitHub repo URL"
               />
-              <select value={mode} onChange={(e) => setMode(e.target.value)} style={{ marginRight: 8 }}>
+              <select
+                value={mode}
+                onChange={(e) => setMode(e.target.value)}
+                style={{ marginRight: 8 }}
+              >
                 <option value="local">Local (Ollama)</option>
                 <option value="external">External (DeepSeek)</option>
               </select>
-              <label style={{ marginRight: 8 }}>
-                <input
-                  type="checkbox"
-                  checked={wipeDb}
-                  onChange={(e) => setWipeDb(e.target.checked)}
-                  style={{ marginRight: 6 }}
-                />
-                Wipe DB
-              </label>
 
-              <button type="button" onClick={startPipeline} disabled={phase === 'processing'}>
-                {phase === 'processing' ? 'Processing…' : 'Process repository'}
+
+
+              <button
+                type="button"
+                onClick={startPipeline}
+                disabled={phase === "processing"}
+              >
+                {phase === "processing" ? "Processing…" : "Process repository"}
               </button>
             </div>
 
-            {phase === 'processing' && (
+            {phase === "processing" && (
               <div className="progress-row">
                 <div className="progress-header">
                   <span className="status-text">{statusText}</span>
                 </div>
                 <div className="progress-track" aria-label="pipeline progress">
-                  <div className="progress-fill" style={{ width: `${progress}%` }} />
+                  <div
+                    className="progress-fill"
+                    style={{ width: `${progress}%` }}
+                  />
                 </div>
-                <div className="progress-footnote">{Math.round(progress)}% complete</div>
+                <div className="progress-footnote">
+                  {Math.round(progress)}% complete
+                </div>
               </div>
             )}
           </section>

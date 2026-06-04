@@ -46,7 +46,6 @@ class VectorIndexer:
                     "start_line"    : chunk.start_line,
                     "end_line"      : chunk.end_line,
                     "content"       : chunk.content,
-                    "summary"       : chunk.summary,
                 }
             )
             for chunk, embedding in zip(chunks, embeddings)

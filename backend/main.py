@@ -36,7 +36,6 @@ app.add_middleware(
 class ProcessRequest(BaseModel):
     repo_url: str = Field(..., min_length=1)
     mode: str = Field(default="local", description="Answer mode: 'local' or 'external'")
-    wipe_db: bool = Field(default=False, description="If true, wipe existing DB and chunks before ingest")
 
 
 class ChatRequest(BaseModel):
@@ -75,22 +74,28 @@ QA_RESPONSE_FILE = Path("data/responses/latest.md")
 def health() -> dict[str, str]:
     return {"status": "ok"}
 
+@app.post("/api/reset")
+def reset_database() -> dict[str, str]:
+    """Clear all indexed data: Qdrant collection, chunks, summaries, and markers."""
+    _reset_index_state(wipe=True)
+    return {"status": "reset", "message": "All data has been wiped."}
+
 
 @app.post("/api/process", response_model=ProcessResponse)
 def process_repository(payload: ProcessRequest) -> ProcessResponse:
     repo_name = _repo_name_from_url(payload.repo_url)
 
-    # Check if already indexed and not forcing a wipe
-    if not payload.wipe_db and _repo_marker_matches(repo_name):
+    # Check if already indexed
+    if _repo_marker_matches(repo_name):
         APP_STATE.update({
             "phase": "ready",
             "progress": 100,
             "message": f"Repository {repo_name} is already indexed.",
+            "stage": f"Repository {repo_name} is already indexed.",
             "ready": True,
             "mode": payload.mode,
             "indexed_repo_name": repo_name,
         })
-
         return ProcessResponse(
             repo_url=payload.repo_url,
             repo_name=repo_name,
@@ -99,50 +104,84 @@ def process_repository(payload: ProcessRequest) -> ProcessResponse:
             message="Repository already indexed. Reusing existing chunks and embeddings.",
         )
 
-    # Only reset if we're actually going to process a new repo
-    # Also, only wipe if payload.wipe_db is True (not just reset state)
-    if payload.wipe_db:
-        _reset_index_state(wipe=True)
-    else:
-        # For non-wipe but new repo, just reset the state but keep existing data?
-        # Actually, we need to clear APP_STATE for the new repo
-        APP_STATE.update({"phase": "processing", "progress": 0, "message": "Processing new repository...", "ready": False})
+    # Reset state for new repo processing
+    APP_STATE.update({
+        "phase": "processing", 
+        "progress": 0, 
+        "message": "Processing new repository...",
+        "stage": "Starting repository processing",
+        "ready": False
+    })
     
-    # The rest of your processing code...
-    embedding_future = prime_embedding_pipeline()
-    # ... rest of the function
+    try:
+        # Update state: starting
+        APP_STATE.update({
+            "phase": "processing", 
+            "progress": 5, 
+            "message": "Starting ingestion...",
+            "stage": "Ingesting repository"
+        })
 
-    # Update state: starting
-    APP_STATE.update({"phase": "processing", "progress": 5, "message": "Starting ingestion...", "ready": False})
+        ingestion = IngestionPipeline()
+        files = ingestion.ingest(payload.repo_url)
+        
+        APP_STATE.update({
+            "progress": 20, 
+            "message": f"Cloned {len(files)} files",
+            "stage": f"Cloned {len(files)} files"
+        })
 
-    ingestion = IngestionPipeline()
-    files = ingestion.ingest(payload.repo_url)
-    APP_STATE.update({"progress": 20, "message": f"Cloned {len(files)} files"})
+        chunker = ChunkPipeline()
+        chunks = chunker.chunk_repository(files, repo_name=repo_name)
+        
+        APP_STATE.update({
+            "progress": 55, 
+            "message": f"Created {len(chunks)} chunks",
+            "stage": "Chunking code"
+        })
 
-    chunker = ChunkPipeline()
-    chunks = chunker.chunk_repository(files, repo_name=repo_name)
-    APP_STATE.update({"progress": 55, "message": f"Created {len(chunks)} chunks"})
+        # Start embedding in background if possible, or do it synchronously with updates
+        APP_STATE.update({
+            "progress": 70, 
+            "message": "Embedding chunks...",
+            "stage": "Embedding chunks"
+        })
+        
+        embedder = get_embedding_pipeline()
+        embedder.embed_repo(repo_name)
 
-    embedder = embedding_future.result()
-    APP_STATE.update({"progress": 70, "message": "Embedding chunks..."})
-    embedder.embed_repo(repo_name)
+        # Remember the selected mode
+        APP_STATE.update({"mode": payload.mode})
+        APP_STATE.update({"indexed_repo_name": repo_name})
 
-    # Remember the selected mode so subsequent /api/chat calls default to it.
-    APP_STATE.update({"mode": payload.mode})
-    APP_STATE.update({"indexed_repo_name": repo_name})
+        # Finalize
+        APP_STATE.update({
+            "phase": "ready", 
+            "progress": 100, 
+            "message": "Repository ingested and indexed.",
+            "stage": "Ready for chat",
+            "ready": True
+        })
+        
+        _write_repo_marker(repo_name)
+        _write_index_state(repo_name=repo_name, files_discovered=len(files), chunks_created=len(chunks))
 
-    # Finalize
-    APP_STATE.update({"phase": "ready", "progress": 100, "message": "Repository ingested and indexed.", "ready": True})
-    _write_repo_marker(repo_name)
-    _write_index_state(repo_name=repo_name, files_discovered=len(files), chunks_created=len(chunks))
-
-    return ProcessResponse(
-        repo_url=payload.repo_url,
-        repo_name=repo_name,
-        files_discovered=len(files),
-        chunks_created=len(chunks),
-        message="Repository ingested, chunked, and embedded successfully.",
-    )
+        return ProcessResponse(
+            repo_url=payload.repo_url,
+            repo_name=repo_name,
+            files_discovered=len(files),
+            chunks_created=len(chunks),
+            message="Repository ingested, chunked, and embedded successfully.",
+        )
+    except Exception as e:
+        APP_STATE.update({
+            "phase": "error",
+            "progress": 0,
+            "message": f"Error: {str(e)}",
+            "stage": "Error occurred",
+            "ready": False
+        })
+        raise
 
 
 @app.post("/api/chat", response_model=ChatResponse)
@@ -234,6 +273,10 @@ def status() -> dict[str, Any]:
     state.update({
         "qdrant_collection": _collection_exists("code_chunks"),
         "chunks_dir": chunks_dir.exists(),
+        "stage": APP_STATE.get("message", "idle"),  # Add this line
+        "progress": APP_STATE.get("progress", 0),   # Ensure progress is always included
+        "phase": APP_STATE.get("phase", "idle"),    # Ensure phase is always included
+        "ready": APP_STATE.get("ready", False),     # Ensure ready is always included
     })
     return state
 
@@ -286,36 +329,29 @@ def get_answer_generator(mode: str = "local") -> AnswerGenerator:
 
 
 def _reset_index_state(wipe: bool = True) -> None:
-    """Clear old vector/chunk artifacts before ingesting a new repository.
-
-    If `wipe` is False, do not delete the Qdrant collection or existing chunk files.
-    """
+    """Clear old vector/chunk artifacts and summaries."""
     from vector_store.qdrant_client import QdrantManager
 
     if wipe:
         try:
+            # Delete Qdrant collection
             client = QdrantManager().get_client()
-
-            try:
-                if _collection_exists("code_chunks"):
-                    client.delete_collection("code_chunks")
-            except Exception:
-                # If the local store is already busy or the collection is missing, continue.
-                pass
-
-            chunks_dir = Path("data/chunks")
-            if chunks_dir.exists():
-                shutil.rmtree(chunks_dir, ignore_errors=True)
-            if REPO_MARKER_FILE.exists():
-                REPO_MARKER_FILE.unlink()
-            if INDEX_STATE_FILE.exists():
-                INDEX_STATE_FILE.unlink()
-            if QA_RESPONSE_FILE.exists():
-                QA_RESPONSE_FILE.unlink()
+            if _collection_exists("code_chunks"):
+                client.delete_collection("code_chunks")
         except Exception:
-            # If wiping fails for any reason, continue without raising to avoid blocking ingestion.
             pass
 
+        # Remove data/chunks and data/summary directories
+        for dir_path in [Path("data/chunks"), Path("data/summary")]:
+            if dir_path.exists():
+                shutil.rmtree(dir_path, ignore_errors=True)
+
+        # Remove marker files
+        for file_path in [REPO_MARKER_FILE, INDEX_STATE_FILE, QA_RESPONSE_FILE]:
+            if file_path.exists():
+                file_path.unlink()
+
+    # Always reset the in-memory state
     APP_STATE.update({"phase": "idle", "progress": 0, "message": "idle", "ready": False})
 
 
