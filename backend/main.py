@@ -2,27 +2,34 @@ from __future__ import annotations
 
 from dataclasses import asdict
 import json
-import shutil
-import os
 from functools import lru_cache
 from pathlib import Path
-from concurrent.futures import ThreadPoolExecutor
 from typing import Any
-from urllib.parse import urlparse
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from chunking.chunk_pipeline import ChunkPipeline
-from embedding.embedding_pipeline import EmbeddingPipeline
-from ingestion.ingestion_pipeline import IngestionPipeline
+from backend.auth import get_current_user
+from backend.state import (
+    collection_exists,
+    repo_marker_matches,
+    repo_name_from_url,
+    reset_index_state,
+    write_index_state,
+    write_qa_markdown,
+    write_repo_marker,
+)
+from orchestration.orchestrator import Orchestrator
+from rag.answer_generator import AnswerGenerator
+from rag.context_builder import ContextBuilder
+from rag.llm_client import LLMClient
+from rag.prompt_builder import PromptBuilder
 from retrieval.retrieval_pipeline import RetrievalPipeline
-from rag.local.answer_generator import AnswerGenerator
+
 
 app = FastAPI(title="Librarian AI API", version="0.1.0")
-EMBEDDING_PRELOADER = ThreadPoolExecutor(max_workers=1)
 
 app.add_middleware(
     CORSMiddleware,
@@ -35,12 +42,10 @@ app.add_middleware(
 
 class ProcessRequest(BaseModel):
     repo_url: str = Field(..., min_length=1)
-    mode: str = Field(default="local", description="Answer mode: 'local' or 'external'")
 
 
 class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1)
-    mode: str | None = Field(default=None, description="Optional override: 'local' or 'external'")
 
 
 class ProcessResponse(BaseModel):
@@ -56,7 +61,6 @@ class ChatResponse(BaseModel):
     citations: list[dict[str, Any]] = []
 
 
-# Simple in-memory app state to report progress to frontend.
 APP_STATE: dict[str, Any] = {
     "phase": "idle",
     "progress": 0,
@@ -65,35 +69,29 @@ APP_STATE: dict[str, Any] = {
     "indexed_repo_name": None,
 }
 
-INDEX_STATE_FILE = Path("data/chunks/index_state.json")
-REPO_MARKER_FILE = Path("data/chunks/lynko")
-QA_RESPONSE_FILE = Path("data/responses/latest.md")
-
 
 @app.get("/api/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
 
+
 @app.post("/api/reset")
 def reset_database() -> dict[str, str]:
-    """Clear all indexed data: Qdrant collection, chunks, summaries, and markers."""
-    _reset_index_state(wipe=True)
+    reset_index_state(wipe=True)
     return {"status": "reset", "message": "All data has been wiped."}
 
 
 @app.post("/api/process", response_model=ProcessResponse)
-def process_repository(payload: ProcessRequest) -> ProcessResponse:
-    repo_name = _repo_name_from_url(payload.repo_url)
+def process_repository(payload: ProcessRequest, clerk_id: str = Depends(get_current_user)) -> ProcessResponse:
+    repo_name = repo_name_from_url(payload.repo_url)
 
-    # Check if already indexed
-    if _repo_marker_matches(repo_name):
+    if repo_marker_matches(repo_name):
         APP_STATE.update({
             "phase": "ready",
             "progress": 100,
             "message": f"Repository {repo_name} is already indexed.",
             "stage": f"Repository {repo_name} is already indexed.",
             "ready": True,
-            "mode": payload.mode,
             "indexed_repo_name": repo_name,
         })
         return ProcessResponse(
@@ -104,74 +102,48 @@ def process_repository(payload: ProcessRequest) -> ProcessResponse:
             message="Repository already indexed. Reusing existing chunks and embeddings.",
         )
 
-    # Reset state for new repo processing
     APP_STATE.update({
-        "phase": "processing", 
-        "progress": 0, 
+        "phase": "processing",
+        "progress": 0,
         "message": "Processing new repository...",
         "stage": "Starting repository processing",
-        "ready": False
+        "ready": False,
     })
-    
+
     try:
-        # Update state: starting
         APP_STATE.update({
-            "phase": "processing", 
-            "progress": 5, 
+            "phase": "processing",
+            "progress": 5,
             "message": "Starting ingestion...",
-            "stage": "Ingesting repository"
+            "stage": "Ingesting repository",
         })
 
-        ingestion = IngestionPipeline()
-        files = ingestion.ingest(payload.repo_url)
-        
-        APP_STATE.update({
-            "progress": 20, 
-            "message": f"Cloned {len(files)} files",
-            "stage": f"Cloned {len(files)} files"
-        })
+        orchestrator = Orchestrator()
+        result = orchestrator.run(payload.repo_url)
 
-        chunker = ChunkPipeline()
-        chunks = chunker.chunk_repository(files, repo_name=repo_name)
-        
-        APP_STATE.update({
-            "progress": 55, 
-            "message": f"Created {len(chunks)} chunks",
-            "stage": "Chunking code"
-        })
+        APP_STATE.update({"indexed_repo_name": result.repo_name})
 
-        # Start embedding in background if possible, or do it synchronously with updates
         APP_STATE.update({
-            "progress": 70, 
-            "message": "Embedding chunks...",
-            "stage": "Embedding chunks"
-        })
-        
-        embedder = get_embedding_pipeline()
-        embedder.embed_repo(repo_name)
-
-        # Remember the selected mode
-        APP_STATE.update({"mode": payload.mode})
-        APP_STATE.update({"indexed_repo_name": repo_name})
-
-        # Finalize
-        APP_STATE.update({
-            "phase": "ready", 
-            "progress": 100, 
+            "phase": "ready",
+            "progress": 100,
             "message": "Repository ingested and indexed.",
             "stage": "Ready for chat",
-            "ready": True
+            "ready": True,
         })
-        
-        _write_repo_marker(repo_name)
-        _write_index_state(repo_name=repo_name, files_discovered=len(files), chunks_created=len(chunks))
+
+        write_repo_marker(result.repo_name)
+        write_index_state(
+            repo_name=result.repo_name,
+            files_discovered=result.files_discovered,
+            chunks_created=result.chunks_created,
+        )
 
         return ProcessResponse(
             repo_url=payload.repo_url,
-            repo_name=repo_name,
-            files_discovered=len(files),
-            chunks_created=len(chunks),
-            message="Repository ingested, chunked, and embedded successfully.",
+            repo_name=result.repo_name,
+            files_discovered=result.files_discovered,
+            chunks_created=result.chunks_created,
+            message="Repository ingested, chunked, summarized, and embedded successfully.",
         )
     except Exception as e:
         APP_STATE.update({
@@ -179,27 +151,22 @@ def process_repository(payload: ProcessRequest) -> ProcessResponse:
             "progress": 0,
             "message": f"Error: {str(e)}",
             "stage": "Error occurred",
-            "ready": False
+            "ready": False,
         })
         raise
 
 
 @app.post("/api/chat", response_model=ChatResponse)
-def chat(payload: ChatRequest) -> ChatResponse:
-    # Run retrieval + answer generation synchronously for now.
+def chat(payload: ChatRequest, clerk_id: str = Depends(get_current_user)) -> ChatResponse:
     retriever = get_retrieval_pipeline()
     retrieved = retriever.retrieve(payload.message)
-    # Determine which generator to use: request override -> app state -> default local
-    desired_mode = payload.mode or APP_STATE.get("mode") or "local"
 
-    answer_gen = get_answer_generator(mode=desired_mode)
-    # Use streaming to let the LLM client return streamed tokens which are
-    # reassembled into the full text on the server side before sending to frontend.
-    result = answer_gen.generate(query=payload.message, retrieved_chunks=retrieved, stream=True)
-    _write_qa_markdown(
+    result = get_answer_generator().generate(
+        query=payload.message, retrieved_chunks=retrieved, stream=True
+    )
+    write_qa_markdown(
         repo_name=str(APP_STATE.get("indexed_repo_name") or "unknown"),
         query=payload.message,
-        mode=desired_mode,
         answer=result.answer,
         citations=[asdict(c) for c in result.citations],
     )
@@ -208,62 +175,35 @@ def chat(payload: ChatRequest) -> ChatResponse:
 
 
 @app.post("/api/chat/stream")
-def chat_stream(payload: ChatRequest):
-    """Stream the LLM answer as Server-Sent Events (SSE) to the frontend.
-
-    For external providers that support streaming, this endpoint relays tokens as
-    SSE `data: <token>` events. For local/non-streaming providers it falls back
-    to sending the full answer as a single SSE event.
-    """
+def chat_stream(payload: ChatRequest, clerk_id: str = Depends(get_current_user)):
     retriever = get_retrieval_pipeline()
     retrieved = retriever.retrieve(payload.message)
-    desired_mode = payload.mode or APP_STATE.get("mode") or "local"
 
-    # Build the prompt the same way the answer generator does.
-    if desired_mode == "external":
-        from rag.external.answer_generator import AnswerGenerator as ExternalAnswerGenerator
+    context_builder = ContextBuilder(max_chunks=8, token_budget=14000)
+    prompt_builder = PromptBuilder()
+    llm_client = LLMClient()
 
-        gen = ExternalAnswerGenerator()
-        context = gen.context_builder.build(retrieved)
-        prompt_payload = gen.prompt_builder.build(query=payload.message, context=context)
-        llm_client = gen.llm_client
+    context = context_builder.build(retrieved)
+    prompt_payload = prompt_builder.build(query=payload.message, context=context)
 
-        def event_stream():
-            full_answer: list[str] = []
-            try:
-                for token in llm_client.stream_generate(prompt_payload.messages):
-                    full_answer.append(token)
-                    yield f"data: {json.dumps({'token': token})}\n\n"
-            except Exception as exc:
-                yield f"event: error\ndata: {json.dumps({'error': str(exc)})}\n\n"
-            else:
-                _write_qa_markdown(
-                    repo_name=str(APP_STATE.get("indexed_repo_name") or "unknown"),
-                    query=payload.message,
-                    mode=desired_mode,
-                    answer="".join(full_answer),
-                    citations=[],
-                )
-            yield f"data: {json.dumps({'done': True})}\n\n"
-
-        return StreamingResponse(event_stream(), media_type="text/event-stream")
-
-    # Fallback: non-streaming local generator — send full text as single event
-    answer_gen = get_answer_generator(mode=desired_mode)
-    result = answer_gen.generate(query=payload.message, retrieved_chunks=retrieved, stream=False)
-    _write_qa_markdown(
-        repo_name=str(APP_STATE.get("indexed_repo_name") or "unknown"),
-        query=payload.message,
-        mode=desired_mode,
-        answer=result.answer,
-        citations=[asdict(c) for c in result.citations],
-    )
-
-    def single_event():
-        yield f"data: {json.dumps({'token': result.answer})}\n\n"
+    def event_stream():
+        full_answer: list[str] = []
+        try:
+            for token in llm_client.stream_generate(prompt_payload.messages):
+                full_answer.append(token)
+                yield f"data: {json.dumps({'token': token})}\n\n"
+        except Exception as exc:
+            yield f"event: error\ndata: {json.dumps({'error': str(exc)})}\n\n"
+        else:
+            write_qa_markdown(
+                repo_name=str(APP_STATE.get("indexed_repo_name") or "unknown"),
+                query=payload.message,
+                answer="".join(full_answer),
+                citations=[],
+            )
         yield f"data: {json.dumps({'done': True})}\n\n"
 
-    return StreamingResponse(single_event(), media_type="text/event-stream")
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
 @app.get("/api/status")
@@ -271,168 +211,21 @@ def status() -> dict[str, Any]:
     chunks_dir = Path("data/chunks")
     state = APP_STATE.copy()
     state.update({
-        "qdrant_collection": _collection_exists("code_chunks"),
+        "qdrant_collection": collection_exists("code_chunks"),
         "chunks_dir": chunks_dir.exists(),
-        "stage": APP_STATE.get("message", "idle"),  # Add this line
-        "progress": APP_STATE.get("progress", 0),   # Ensure progress is always included
-        "phase": APP_STATE.get("phase", "idle"),    # Ensure phase is always included
-        "ready": APP_STATE.get("ready", False),     # Ensure ready is always included
+        "stage": APP_STATE.get("message", "idle"),
+        "progress": APP_STATE.get("progress", 0),
+        "phase": APP_STATE.get("phase", "idle"),
+        "ready": APP_STATE.get("ready", False),
     })
     return state
 
 
-def _repo_name_from_url(repo_url: str) -> str:
-    parsed = urlparse(repo_url.strip())
-    name = Path(parsed.path).name
-    if name.endswith(".git"):
-        name = name[:-4]
-    return name or "repo"
-
-
-def _collection_exists(collection_name: str) -> bool:
-    from vector_store.qdrant_client import QdrantManager
-
-    client = QdrantManager().get_client()
-    collections = client.get_collections().collections
-    return any(collection.name == collection_name for collection in collections)
-
-
 @lru_cache(maxsize=1)
 def get_retrieval_pipeline() -> RetrievalPipeline:
-    """Cache the retrieval stack so it does not reload large models on every chat request."""
-    query_device = os.getenv("RAG_QUERY_DEVICE", "cpu")
-    reranker_device = os.getenv("RAG_RERANKER_DEVICE", "cpu")
-    return RetrievalPipeline(query_device=query_device, reranker_device=reranker_device)
+    return RetrievalPipeline()
 
 
 @lru_cache(maxsize=1)
-def get_embedding_pipeline() -> EmbeddingPipeline:
-    """Cache the embedding stack so the model stays loaded after warmup."""
-    return EmbeddingPipeline()
-
-
-def prime_embedding_pipeline():
-    """Load the embedding model in the background while ingestion is running."""
-    return EMBEDDING_PRELOADER.submit(get_embedding_pipeline)
-
-
-@lru_cache(maxsize=4)
-def get_answer_generator(mode: str = "local") -> AnswerGenerator:
-    mode = (mode or "local").strip().lower()
-    if mode == "external":
-        from rag.external.answer_generator import AnswerGenerator as ExternalAnswerGenerator
-
-        return ExternalAnswerGenerator()
-
-    # Default to local
+def get_answer_generator() -> AnswerGenerator:
     return AnswerGenerator()
-
-
-def _reset_index_state(wipe: bool = True) -> None:
-    """Clear old vector/chunk artifacts and summaries."""
-    from vector_store.qdrant_client import QdrantManager
-
-    if wipe:
-        try:
-            # Delete Qdrant collection
-            client = QdrantManager().get_client()
-            if _collection_exists("code_chunks"):
-                client.delete_collection("code_chunks")
-        except Exception:
-            pass
-
-        # Remove data/chunks and data/summary directories
-        for dir_path in [Path("data/chunks"), Path("data/summary")]:
-            if dir_path.exists():
-                shutil.rmtree(dir_path, ignore_errors=True)
-
-        # Remove marker files
-        for file_path in [REPO_MARKER_FILE, INDEX_STATE_FILE, QA_RESPONSE_FILE]:
-            if file_path.exists():
-                file_path.unlink()
-
-    # Always reset the in-memory state
-    APP_STATE.update({"phase": "idle", "progress": 0, "message": "idle", "ready": False})
-
-
-def _repo_marker_matches(repo_name: str) -> bool:
-    """Return True when the marker file already contains the current repo name."""
-    if not REPO_MARKER_FILE.exists():
-        return False
-
-    try:
-        marker_text = REPO_MARKER_FILE.read_text(encoding="utf-8").strip()
-        # Exact match, not substring
-        if marker_text != repo_name:
-            return False
-    except Exception:
-        return False
-
-    return _collection_exists("code_chunks")
-
-
-def _load_index_state() -> dict[str, Any]:
-    if not INDEX_STATE_FILE.exists():
-        return {}
-
-    try:
-        return json.loads(INDEX_STATE_FILE.read_text(encoding="utf-8"))
-    except Exception:
-        return {}
-
-
-def _write_index_state(repo_name: str, files_discovered: int, chunks_created: int) -> None:
-    try:
-        INDEX_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
-        INDEX_STATE_FILE.write_text(
-            json.dumps(
-                {
-                    "repo_name": repo_name,
-                    "files_discovered": files_discovered,
-                    "chunks_created": chunks_created,
-                },
-                indent=2,
-            ),
-            encoding="utf-8",
-        )
-    except Exception:
-        # The marker is only used for fast reuse checks; failing to write it should not block ingest.
-        pass
-
-
-def _write_repo_marker(repo_name: str) -> None:
-    try:
-        REPO_MARKER_FILE.parent.mkdir(parents=True, exist_ok=True)
-        # Write exactly the repo name with no extra whitespace
-        REPO_MARKER_FILE.write_text(repo_name.strip(), encoding="utf-8")
-    except Exception:
-        pass
-
-
-def _write_qa_markdown(repo_name: str, query: str, mode: str, answer: str, citations: list[dict[str, Any]]) -> None:
-    try:
-        QA_RESPONSE_FILE.parent.mkdir(parents=True, exist_ok=True)
-        citation_lines = [
-            f"- [{citation.get('citation_id', '')}] {citation.get('file_path', '')}:{citation.get('start_line', '')}-{citation.get('end_line', '')}"
-            for citation in citations
-            if citation
-        ]
-
-        md = [
-            f"# QA Response",
-            f"- Repo: {repo_name}",
-            f"- Mode: {mode}",
-            "",
-            "## Question",
-            query,
-            "",
-            "## Answer",
-            answer,
-        ]
-
-        if citation_lines:
-            md.extend(["", "## Citations", *citation_lines])
-
-        QA_RESPONSE_FILE.write_text("\n".join(md).rstrip() + "\n", encoding="utf-8")
-    except Exception:
-        pass

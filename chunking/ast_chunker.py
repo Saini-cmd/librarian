@@ -24,9 +24,9 @@ def collect_tree_nodes(node, wanted_nodes) -> List:
 
 class ASTChunker:
 
-    def __init__(self, model="BAAI/bge-large-en-v1.5", max_tokens=512):
+    def __init__(self, max_tokens=420):
         self.parser_manager = ParserManager()
-        self.splitter = TokenSplitter(model_name=model, max_tokens=max_tokens)
+        self.splitter = TokenSplitter(max_tokens=max_tokens)
 
     def chunk_file(self, file_metadata: dict) -> List[CodeChunk]:
 

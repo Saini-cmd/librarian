@@ -18,14 +18,13 @@ def main():
     embedder = EmbeddingPipeline()
 
     for repo_url in REPOS:
-        name = repo_url.removesuffix(".git").split("/")[-1]
         print(f"\nProcessing: {repo_url}")
 
         files = ingestion.ingest(repo_url)
-        chunks = chunker.chunk_repository(files, repo_name=name)
+        chunks = chunker.chunk_repository(files)
         print(f"Total chunks: {len(chunks)}")
 
-        embedder.embed_repo(name)
+        embedder.embed_chunks(chunks)
 
 
 if __name__ == "__main__":

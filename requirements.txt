@@ -1,9 +1,14 @@
+fastapi
+uvicorn
 qdrant-client
-sentence-transformers
-torch
+tiktoken
 tqdm
 requests
 python-dotenv
+langchain-openai
+langchain-core
+langchain-text-splitters
+langchain-community
 tree-sitter
 tree-sitter-python
 tree-sitter-javascript
@@ -16,5 +21,3 @@ tree-sitter-c
 tree-sitter-cpp
 tree-sitter-c-sharp
 tree-sitter-ruby
-fastapi
-uvicorn

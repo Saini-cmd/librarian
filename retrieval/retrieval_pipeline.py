@@ -1,13 +1,12 @@
 import logging
-import os
 from typing import Any
 
-from reranking.bge_reranker import BGEReranker
+from embedding.api_embedder import APIEmbedder
+from reranking.openrouter_reranker import OpenRouterReranker
 from retrieval.bm25_index import BM25Index
 from retrieval.hybrid_retriever import HybridRetriever
 from retrieval.post_retrieval import PostRetrievalProcessor
 from retrieval.query_expander import QueryExpander
-from retrieval.query_embedder import QueryEmbedder
 from retrieval.vector_retriever import VectorRetriever
 
 
@@ -17,7 +16,7 @@ logger = logging.getLogger(__name__)
 class RetrievalPipeline:
     """
     Production retrieval flow:
-    1) Query embedding
+    1) Query embedding (via OpenRouter API)
     2) Dense vector retrieval (Qdrant)
     3) BM25 keyword retrieval
     4) RRF merge
@@ -32,15 +31,11 @@ class RetrievalPipeline:
         rrf_k: int = 60,
         rrf_top_k: int = 30,
         final_top_k: int = 8,
-        query_device: str | None = None,
-        reranker_device: str | None = None,
     ):
         self.final_top_k = final_top_k
-        query_device = query_device or os.getenv("RAG_QUERY_DEVICE", "cpu")
-        reranker_device = reranker_device or os.getenv("RAG_RERANKER_DEVICE", "cpu")
 
         self.query_expander = QueryExpander()
-        self.query_embedder = QueryEmbedder(model_name="BAAI/bge-large-en-v1.5", device=query_device)
+        self.query_embedder = APIEmbedder(model="BAAI/bge-base-en-v1.5")
         self.vector_retriever = VectorRetriever(
             collection_name=collection_name,
             top_k=vector_top_k,
@@ -58,7 +53,7 @@ class RetrievalPipeline:
             rrf_top_k=rrf_top_k,
         )
         self.post_processor = PostRetrievalProcessor()
-        self.reranker = BGEReranker(model_name="BAAI/bge-reranker-large", device=reranker_device)
+        self.reranker = OpenRouterReranker(model="cohere/rerank-4-fast")
 
     def retrieve(self, query: str) -> list[dict[str, Any]]:
         logger.info("stage=retrieval_start")
@@ -91,6 +86,3 @@ class RetrievalPipeline:
 
         logger.info("stage=final_returned count=%d", len(final_results))
         return final_results
-
-    def retrieve_many(self, queries: list[str]) -> list[list[dict[str, Any]]]:
-        return [self.retrieve(query) for query in queries]

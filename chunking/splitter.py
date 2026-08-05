@@ -1,26 +1,23 @@
 from uuid import uuid4
-from transformers import AutoTokenizer
-from pathlib import Path
 from typing import List
+
+import tiktoken
+
 from chunking.chunk_model import CodeChunk
 
+
 DEFAULT_MAX_TOKENS = 512
+_ENCODING = "cl100k_base"
+
 
 class TokenSplitter:
 
-    def __init__(
-        self,
-        model_name: str = "BAAI/bge-large-en-v1.5",
-        max_tokens: int = DEFAULT_MAX_TOKENS,
-    ):
-        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+    def __init__(self, max_tokens: int = DEFAULT_MAX_TOKENS):
+        self.tokenizer = tiktoken.get_encoding(_ENCODING)
         self.max_tokens = max_tokens
-        self.new_line_tokens = len(
-            self.tokenizer.encode("\n", add_special_tokens=False)
-        )
 
     def count_tokens(self, text: str) -> int:
-        return len(self.tokenizer.encode(text, add_special_tokens=False))
+        return len(self.tokenizer.encode(text))
 
     def split_to_chunks(
         self,
@@ -33,15 +30,11 @@ class TokenSplitter:
         chunk_source: str = "text",
         start_line: int = 1,
     ) -> List[CodeChunk]:
-        """
-        Token-aware splitting of a text/code string into CodeChunk objects.
-        """
-
         if not src.strip():
             return []
 
         lines = src.split("\n")
-        current_lines = []
+        current_lines: list[str] = []
         current_tokens = 0
         split_start = start_line
         chunks: List[CodeChunk] = []
@@ -64,7 +57,7 @@ class TokenSplitter:
             ))
 
         for line in lines:
-            line_tokens = self.count_tokens(line) + self.new_line_tokens
+            line_tokens = self.count_tokens(line) + 1
 
             if current_tokens + line_tokens > self.max_tokens and current_lines:
                 flush()
@@ -79,12 +72,3 @@ class TokenSplitter:
             flush()
 
         return chunks
-
-
-
-
-
-
-
-
-

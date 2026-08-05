@@ -1,29 +1,13 @@
 import logging
-from dataclasses import dataclass
 
 from chunking.chunk_model import CodeChunk
+from rag.types import HybridCandidate, HybridRetrievalResult
 from retrieval.bm25_index import BM25Index
 from retrieval.rrf import reciprocal_rank_fusion
 from retrieval.vector_retriever import VectorRetriever
 
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass
-class HybridCandidate:
-    chunk: CodeChunk
-    rrf_score: float
-    vector_score: float | None = None
-    bm25_score: float | None = None
-    adjusted_score: float | None = None
-
-
-@dataclass
-class HybridRetrievalResult:
-    candidates: list[HybridCandidate]
-    vector_count: int
-    bm25_count: int
 
 
 class HybridRetriever:

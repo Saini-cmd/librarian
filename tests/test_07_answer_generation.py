@@ -3,7 +3,7 @@ from bootstrap import ensure_repo_root
 ensure_repo_root()
 
 from retrieval.retrieval_pipeline import RetrievalPipeline
-from rag.local.answer_generator import AnswerGenerator
+from rag.answer_generator import AnswerGenerator
 
 
 QUERIES = [

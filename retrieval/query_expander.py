@@ -32,16 +32,3 @@ class QueryExpander:
 
         return expanded_query
 
-    def expand_many(self, query: str) -> list[str]:
-        expanded_queries = [query]
-
-        for term in self.intent_terms:
-            expanded_queries.append(f"{query} {term}")
-
-        logger.info(
-            "stage=query_expansion_many original=%s expanded_count=%d",
-            query,
-            len(expanded_queries),
-        )
-
-        return expanded_queries

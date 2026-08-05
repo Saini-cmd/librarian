@@ -1,15 +1,24 @@
 import uuid
 from pathlib import Path
 from typing import List
+
+from langchain_text_splitters import TokenTextSplitter
+
 from chunking.chunk_model import CodeChunk
 
-CHUNK_SIZE = 400
+
+CHUNK_SIZE = 420
 CHUNK_OVERLAP = 50
 
+
 class TextChunker:
-    """
-    Chunk plain text or non-AST files using simple token-based splitting.
-    """
+    """Chunk plain text or non-AST files using LangChain's TokenTextSplitter."""
+
+    def __init__(self):
+        self._splitter = TokenTextSplitter(
+            chunk_size=CHUNK_SIZE,
+            chunk_overlap=CHUNK_OVERLAP,
+        )
 
     def chunk_file(self, file_metadata: dict) -> List[CodeChunk]:
 
@@ -25,18 +34,13 @@ class TextChunker:
         except Exception:
             return []
 
-        tokens = text.split()
+        # Use TokenTextSplitter to split into documents, then convert to CodeChunk
+        docs = self._splitter.split_text(text)
         chunks: List[CodeChunk] = []
 
-        start = 0
-        while start < len(tokens):
-            end = start + CHUNK_SIZE
-            chunk_tokens = tokens[start:end]
-            chunk_text = " ".join(chunk_tokens)
-
+        for chunk_text in docs:
             start_line, end_line = self._estimate_lines(text, chunk_text)
-
-            chunk = CodeChunk(
+            chunks.append(CodeChunk(
                 chunk_id=str(uuid.uuid4()),
                 repo=repo,
                 file_path=relative_path,
@@ -49,19 +53,12 @@ class TextChunker:
                 start_line=start_line,
                 end_line=end_line,
                 content=chunk_text,
-            )
-
-            chunks.append(chunk)
-
-            start += CHUNK_SIZE - CHUNK_OVERLAP
+            ))
 
         return chunks
 
     @staticmethod
     def _estimate_lines(full_text: str, chunk_text: str) -> tuple[int, int]:
-        """
-        Estimate start and end line numbers of a chunk within the full text.
-        """
         start_index = full_text.find(chunk_text)
         if start_index == -1:
             return 1, 1

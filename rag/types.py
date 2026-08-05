@@ -5,6 +5,22 @@ from typing import Any
 from chunking.chunk_model import CodeChunk
 
 
+@dataclass
+class HybridCandidate:
+    chunk: CodeChunk
+    rrf_score: float
+    vector_score: float | None = None
+    bm25_score: float | None = None
+    adjusted_score: float | None = None
+
+
+@dataclass
+class HybridRetrievalResult:
+    candidates: list[HybridCandidate]
+    vector_count: int
+    bm25_count: int
+
+
 @dataclass(frozen=True)
 class RetrievedChunk:
     chunk: CodeChunk
@@ -51,13 +67,13 @@ class PromptPayload:
 
 @dataclass(frozen=True)
 class LLMConfig:
-    model: str = field(default_factory=lambda: os.getenv("OLLAMA_MODEL", "gemma4:e2b-it-q4_K_M"))
-    base_url: str = field(default_factory=lambda: os.getenv("OLLAMA_HOST", "http://localhost:11434"))
-    temperature: float = 0.1
+    api_key: str = field(default_factory=lambda: os.getenv("DEEPSEEK_API_KEY", ""))
+    model: str = field(default_factory=lambda: os.getenv("DEEPSEEK_MODEL", "deepseek-chat"))
+    base_url: str = field(default_factory=lambda: os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com"))
+    temperature: float = 0.2
     max_tokens: int = 1024
-    timeout_seconds: float = 300.0
+    timeout_seconds: float = 120.0
     retries: int = 3
-    retry_backoff_seconds: float = 1.0
 
 
 @dataclass(frozen=True)

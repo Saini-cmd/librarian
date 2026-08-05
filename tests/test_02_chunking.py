@@ -44,12 +44,11 @@ def main():
     failed_repos = []
 
     for repo_url in REPOS:
-        name = repo_url.removesuffix(".git").split("/")[-1]
         print(f"\nProcessing: {repo_url}")
 
         try:
             files_metadata = ingestion.ingest(repo_url)
-            all_chunks = chunker.chunk_repository(files_metadata, repo_name=name)
+            all_chunks = chunker.chunk_repository(files_metadata)
 
             print(f"Total files  : {len(files_metadata)}")
             print(f"Total chunks : {len(all_chunks)}")

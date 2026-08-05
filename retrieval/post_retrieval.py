@@ -1,6 +1,6 @@
 from dataclasses import replace
 
-from retrieval.hybrid_retriever import HybridCandidate
+from rag.types import HybridCandidate
 
 
 PENALTY_DIRS = (
