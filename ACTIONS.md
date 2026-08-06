@@ -90,3 +90,24 @@ Tracked from [PLAN.md](PLAN.md). Update status as work progresses.
 - [ ] Set all environment variables in hosting dashboard
 - [ ] Add `.env.example` with all required keys
 - [ ] Verify: production chat round-trip
+
+## Phase 10: Self-Hosted Local Infra ✅
+
+Goal: backend runs on a local server with local Qdrant + PostgreSQL; only model APIs (DeepSeek, OpenRouter) outsourced. Cloud Qdrant kept dormant.
+
+- [x] Add `docker-compose.yml` — `qdrant` (6333) + `postgres:16` (5432) services
+- [x] Switch `.env` to `QDRANT_MODE=server` + `QDRANT_LOCAL_URL`; cloud env commented out (dormant)
+- [x] Add `DATABASE_URL` (local Postgres) + `.env.example`
+- [x] Add `sqlalchemy`, `psycopg2-binary` to `requirements.txt`
+- [x] `vector_store/qdrant_client.py` — `QDRANT_MODE` resolution (server default, cloud/embedded dormant)
+- [x] `backend/database.py` — sync SQLAlchemy engine, `SessionLocal`, `get_db`, `init_db`
+- [x] `backend/models.py` — User, Conversation, Message, UserRepo, PipelineState, FileSummary, QaRecord
+- [x] `backend/state.py` — DB-backed helpers (replaces APP_STATE + flat files)
+- [x] `backend/routers/` — users, conversations, repositories routers
+- [x] `backend/main.py` — mount routers, DB-backed pipeline state, chat persists messages, QA records in DB
+- [x] `summarization/summary_store.py` — DB-backed, static interface preserved
+- [x] Wipe old runtime data (qdrant_db/, data/chunks|summaries|responses|repos)
+- [x] Verify live stack: install Docker, `docker compose up -d` (qdrant + postgres healthy), Postgres smoke test, backend 401/auth checks, test_01 ingestion + test_02 chunking pass
+- [x] Pin `qdrant/qdrant:v1.17.0` image to match installed `qdrant-client` 1.17.0
+- [ ] Run paid-API pipeline tests (test_03–08: embedding, retrieval, answer, summarization) + full UI chat round-trip
+- [ ] Deploy backend as a service (uvicorn) on the server

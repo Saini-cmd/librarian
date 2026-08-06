@@ -87,7 +87,7 @@ When the user requests a durable behavior change, record it here or in the relev
 
 | Path | Purpose |
 |---|---|
-| `backend/` | FastAPI server — REST API for repo ingestion and chat |
+| `backend/` | FastAPI server — REST API for repo ingestion, chat, users, conversations, repos; PostgreSQL-backed state (sync SQLAlchemy) |
 | `chunking/` | Semantic code chunking (AST + text) — no pickle, no summaries |
 | `embedding/` | Embedding pipeline — vectorize chunks via OpenRouter API and upsert to Qdrant |
 | `frontend/` | React 18 SPA — daisyUI 5 + Tailwind CSS 4, brutalist dark theme, router-based pages (Landing, App, Settings), Axios API client with Clerk auth |
@@ -95,16 +95,16 @@ When the user requests a durable behavior change, record it here or in the relev
 | `orchestration/` | Pipeline orchestrator — clone → chunk → summarize → embed → cleanup |
 | `rag/` | Answer generation — context building, prompt construction, LLM (DeepSeek via ChatOpenAI) |
 | `reranking/` | Reranking via OpenRouter API (cohere/rerank-4-fast) |
-| `summarization/` | Per-file LLM summarization (DeepSeek via ChatOpenAI) stored as JSON per repo |
+| `summarization/` | Per-file LLM summarization (DeepSeek via ChatOpenAI) stored in PostgreSQL |
 | `retrieval/` | Hybrid retrieval — dense vector + BM25 + RRF + rerank |
 | `tests/` | Smoke-test scripts for each pipeline stage |
-| `vector_store/` | Qdrant client singleton and vector management (local or cloud) |
+| `vector_store/` | Qdrant client singleton and vector management (local Docker server default; cloud/embedded dormant) |
 
 ### Non-Durable (owned by root)
 
 | Path | Reason |
 |---|---|
-| `data/` | Runtime artifacts (chunks, repos, summaries, responses) — no durable code |
+| `data/` | Runtime artifacts (cloned repos — transient, cleaned after ingest); durable data lives in PostgreSQL/Qdrant |
 | `qdrant_db/` | Qdrant persistent storage (auto-managed) |
 | `venv/` | Python virtual environment (not tracked) |
 | `.env` | Environment configuration (secrets, endpoints) |
@@ -114,4 +114,11 @@ When the user requests a durable behavior change, record it here or in the relev
 | `ACTIONS.md` | Scratchpad — not tracked |
 | `dev.sh` | Dev startup script — convenience only |
 | `.agents/` | Agent skills and configurations (installed by `npx skills`) |
+
+### Root-Owned Durable Config
+
+| Path | Purpose |
+|---|---|
+| `docker-compose.yml` | Local infra — `qdrant` (port 6333) + `postgres` (port 5432) services, named volumes |
+| `.env.example` | Documents every required env key (model APIs, local infra, Clerk) |
 

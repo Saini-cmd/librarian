@@ -5,6 +5,8 @@ tiktoken
 tqdm
 requests
 python-dotenv
+sqlalchemy
+psycopg2-binary
 langchain-openai
 langchain-core
 langchain-text-splitters

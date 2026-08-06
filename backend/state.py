@@ -1,15 +1,22 @@
-import json
-import shutil
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
+from sqlalchemy.orm import Session
+
+from backend.models import (
+    Conversation,
+    FileSummary,
+    Message,
+    PipelineState,
+    QaRecord,
+    User,
+    UserRepo,
+)
 from vector_store.qdrant_client import QdrantManager
 
 
-INDEX_STATE_FILE = Path("data/chunks/index_state.json")
-REPO_MARKER_FILE = Path("data/chunks/repo_marker.txt")
-QA_RESPONSE_FILE = Path("data/responses/latest.md")
+COLLECTION_NAME = "code_chunks"
 
 
 def repo_name_from_url(repo_url: str) -> str:
@@ -18,79 +25,156 @@ def repo_name_from_url(repo_url: str) -> str:
     return name[:-4] if name.endswith(".git") else name or "repo"
 
 
-def collection_exists(collection_name: str = "code_chunks") -> bool:
-    client = QdrantManager().get_client()
-    collections = client.get_collections().collections
-    return any(c.name == collection_name for c in collections)
-
-
-def repo_marker_matches(repo_name: str) -> bool:
-    if not REPO_MARKER_FILE.exists():
-        return False
+def collection_exists(collection_name: str = COLLECTION_NAME) -> bool:
     try:
-        return REPO_MARKER_FILE.read_text(encoding="utf-8").strip() == repo_name
+        client = QdrantManager().get_client()
+        collections = client.get_collections().collections
+        return any(c.name == collection_name for c in collections)
     except Exception:
         return False
 
 
-def write_repo_marker(repo_name: str) -> None:
-    try:
-        REPO_MARKER_FILE.parent.mkdir(parents=True, exist_ok=True)
-        REPO_MARKER_FILE.write_text(repo_name.strip(), encoding="utf-8")
-    except Exception:
-        pass
+# ---- Pipeline state (replaces APP_STATE + marker/index files) ----
 
 
-def write_index_state(repo_name: str, files_discovered: int, chunks_created: int) -> None:
-    try:
-        INDEX_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
-        INDEX_STATE_FILE.write_text(
-            json.dumps(
-                {"repo_name": repo_name, "files_discovered": files_discovered, "chunks_created": chunks_created},
-                indent=2,
-            ),
-            encoding="utf-8",
-        )
-    except Exception:
-        pass
+def get_pipeline_state(db: Session) -> PipelineState:
+    state = db.get(PipelineState, 1)
+    if state is None:
+        state = PipelineState(id=1)
+        db.add(state)
+        db.commit()
+        db.refresh(state)
+    return state
 
 
-def write_qa_markdown(repo_name: str, query: str, answer: str, citations: list[dict[str, Any]]) -> None:
-    try:
-        QA_RESPONSE_FILE.parent.mkdir(parents=True, exist_ok=True)
-        citation_lines = [
-            f"- [{c.get('citation_id', '')}] {c.get('file_path', '')}:{c.get('start_line', '')}-{c.get('end_line', '')}"
-            for c in citations if c
-        ]
-        md = [
-            f"# QA Response",
-            f"- Repo: {repo_name}",
-            "",
-            "## Question",
-            query,
-            "",
-            "## Answer",
-            answer,
-        ]
-        if citation_lines:
-            md.extend(["", "## Citations", *citation_lines])
-        QA_RESPONSE_FILE.write_text("\n".join(md).rstrip() + "\n", encoding="utf-8")
-    except Exception:
-        pass
+def update_pipeline_state(db: Session, **kwargs: Any) -> PipelineState:
+    state = get_pipeline_state(db)
+    for key, value in kwargs.items():
+        setattr(state, key, value)
+    db.commit()
+    db.refresh(state)
+    return state
 
 
-def reset_index_state(wipe: bool = True) -> None:
+def pipeline_state_dict(db: Session) -> dict[str, Any]:
+    state = get_pipeline_state(db)
+    return {
+        "phase": state.phase,
+        "progress": state.progress,
+        "message": state.message,
+        "stage": state.stage,
+        "ready": state.ready,
+        "indexed_repo_name": state.indexed_repo_name,
+    }
+
+
+# ---- Users / repos ----
+
+
+def get_user_by_clerk_id(db: Session, clerk_id: str) -> User | None:
+    return db.query(User).filter(User.clerk_id == clerk_id).first()
+
+
+def upsert_user(db: Session, clerk_id: str, **fields: Any) -> User:
+    user = get_user_by_clerk_id(db, clerk_id)
+    if user is None:
+        user = User(clerk_id=clerk_id, **fields)
+        db.add(user)
+    else:
+        for key, value in fields.items():
+            setattr(user, key, value)
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+def user_repo_exists(db: Session, user_id: Any, repo_name: str) -> bool:
+    return (
+        db.query(UserRepo)
+        .filter(UserRepo.user_id == user_id, UserRepo.repo_name == repo_name)
+        .first()
+        is not None
+    )
+
+
+def record_user_repo(
+    db: Session,
+    user_id: Any,
+    repo_name: str,
+    repo_url: str,
+    files_discovered: int,
+    chunks_created: int,
+    status: str = "indexed",
+) -> UserRepo:
+    repo = (
+        db.query(UserRepo)
+        .filter(UserRepo.user_id == user_id, UserRepo.repo_name == repo_name)
+        .first()
+    )
+    if repo is None:
+        repo = UserRepo(user_id=user_id, repo_name=repo_name, repo_url=repo_url)
+        db.add(repo)
+    repo.repo_url = repo_url
+    repo.files_discovered = files_discovered
+    repo.chunks_created = chunks_created
+    repo.status = status
+    db.commit()
+    return repo
+
+
+# ---- Conversations ----
+
+
+def get_or_create_conversation(
+    db: Session,
+    user_id: Any,
+    conversation_id: Any = None,
+    title: str | None = None,
+    repo_name: str | None = None,
+    repo_url: str | None = None,
+) -> Conversation:
+    if conversation_id is not None:
+        conv = db.get(Conversation, conversation_id)
+        if conv is not None and conv.user_id == user_id:
+            return conv
+    conv = Conversation(
+        user_id=user_id,
+        title=title or "New chat",
+        repo_name=repo_name,
+        repo_url=repo_url,
+    )
+    db.add(conv)
+    db.commit()
+    db.refresh(conv)
+    return conv
+
+
+def add_message(db: Session, conversation_id: Any, role: str, content: str) -> Message:
+    msg = Message(conversation_id=conversation_id, role=role, content=content)
+    db.add(msg)
+    db.commit()
+    db.refresh(msg)
+    return msg
+
+
+# ---- Summaries / QA ----
+
+
+def save_qa_record(db: Session, repo_name: str, query: str, answer: str, citations: list[dict]) -> None:
+    db.add(QaRecord(repo_name=repo_name, query=query, answer=answer, citations=citations))
+    db.commit()
+
+
+def reset_index_state(db: Session, wipe: bool = True) -> None:
     if wipe:
         try:
-            if collection_exists():
-                QdrantManager().get_client().delete_collection("code_chunks")
+            if collection_exists(COLLECTION_NAME):
+                QdrantManager().get_client().delete_collection(COLLECTION_NAME)
         except Exception:
             pass
 
-        chunks_dir = Path("data/chunks")
-        if chunks_dir.exists():
-            shutil.rmtree(chunks_dir, ignore_errors=True)
-
-        for file_path in [REPO_MARKER_FILE, INDEX_STATE_FILE, QA_RESPONSE_FILE]:
-            if file_path.exists():
-                file_path.unlink()
+    db.query(QaRecord).delete()
+    db.query(FileSummary).delete()
+    db.query(UserRepo).delete()
+    db.query(PipelineState).delete()
+    db.commit()

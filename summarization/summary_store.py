@@ -1,34 +1,64 @@
-import json
-from pathlib import Path
-
-
-SUMMARY_DIR = Path("data/summaries")
+from backend.database import SessionLocal
+from backend.models import FileSummary
 
 
 class SummaryStore:
 
     @staticmethod
-    def _path(repo_name: str) -> Path:
-        return SUMMARY_DIR / f"{repo_name}.json"
-
-    @staticmethod
     def exists(repo_name: str) -> bool:
-        return SummaryStore._path(repo_name).exists()
+        db = SessionLocal()
+        try:
+            return (
+                db.query(FileSummary)
+                .filter(FileSummary.repo_name == repo_name)
+                .first()
+                is not None
+            )
+        finally:
+            db.close()
 
     @staticmethod
     def save(repo_name: str, summaries: dict[str, str]) -> None:
-        path = SummaryStore._path(repo_name)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(summaries, indent=2, ensure_ascii=False), encoding="utf-8")
+        db = SessionLocal()
+        try:
+            db.query(FileSummary).filter(FileSummary.repo_name == repo_name).delete()
+            for file_path, summary_text in summaries.items():
+                db.add(
+                    FileSummary(
+                        repo_name=repo_name,
+                        file_path=file_path,
+                        summary_text=summary_text,
+                    )
+                )
+            db.commit()
+        finally:
+            db.close()
 
     @staticmethod
     def load(repo_name: str) -> dict[str, str]:
-        path = SummaryStore._path(repo_name)
-        if not path.exists():
-            return {}
-        return json.loads(path.read_text(encoding="utf-8"))
+        db = SessionLocal()
+        try:
+            rows = (
+                db.query(FileSummary)
+                .filter(FileSummary.repo_name == repo_name)
+                .all()
+            )
+            return {row.file_path: row.summary_text for row in rows}
+        finally:
+            db.close()
 
     @staticmethod
     def get(repo_name: str, file_path: str) -> str | None:
-        summaries = SummaryStore.load(repo_name)
-        return summaries.get(file_path)
+        db = SessionLocal()
+        try:
+            row = (
+                db.query(FileSummary)
+                .filter(
+                    FileSummary.repo_name == repo_name,
+                    FileSummary.file_path == file_path,
+                )
+                .first()
+            )
+            return row.summary_text if row else None
+        finally:
+            db.close()

@@ -10,7 +10,11 @@ __pycache__/
 # Generated RAG artifacts
 data/chunks/
 data/repos/
+data/summaries/
+data/responses/
 qdrant_db/
+qdrant_storage/
+postgres_data/
 *.pkl
 *.pickle
 *.parquet
