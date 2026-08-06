@@ -4,11 +4,14 @@ import Layout from "../components/Layout";
 import RepoInput from "../components/RepoInput";
 import ProgressBar from "../components/ProgressBar";
 import ChatMessages from "../components/ChatMessages";
+import SymbolGraphView from "../components/SymbolGraphView";
 import {
   getStatus,
-  processRepo,
   getConversations,
+  getConversation,
   deleteConversation,
+  getRepositories,
+  getRepoGraph,
 } from "../api/client";
 
 const extractRepoName = (url) =>
@@ -26,28 +29,54 @@ export default function AppPage() {
   const [conversations, setConversations] = useState([]);
   const [activeConvId, setActiveConvId] = useState(null);
   const [convLoading, setConvLoading] = useState(true);
+  const [repositories, setRepositories] = useState([]);
+  const [selectedRepo, setSelectedRepo] = useState(null);
+  const [view, setView] = useState("chat");
+  const [graph, setGraph] = useState(null);
+  const [graphRepo, setGraphRepo] = useState(null);
+  const [graphLoading, setGraphLoading] = useState(false);
+  const [graphError, setGraphError] = useState("");
   const abortRef = useRef(null);
   const pollRef = useRef(null);
 
   useEffect(() => {
     loadConversations();
-    checkExistingStatus();
+    loadRepositories();
     return () => {
       if (pollRef.current) clearInterval(pollRef.current);
       if (abortRef.current) abortRef.current.abort();
     };
   }, []);
 
-  async function checkExistingStatus() {
+  useEffect(() => {
+    if (view !== "graph" || !selectedRepo || graphRepo === selectedRepo) return;
+    let cancelled = false;
+    setGraphLoading(true);
+    setGraphError("");
+    getRepoGraph(selectedRepo)
+      .then((data) => {
+        if (cancelled) return;
+        setGraph(data);
+        setGraphRepo(selectedRepo);
+      })
+      .catch((err) => {
+        if (!cancelled) setGraphError(err.message || "Failed to load graph");
+      })
+      .finally(() => {
+        if (!cancelled) setGraphLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [view, selectedRepo, graphRepo]);
+
+  async function loadRepositories() {
     try {
-      const status = await getStatus();
-      if (status.ready || status.phase === "ready") {
-        setPhase("ready");
-        setProgress(100);
-        setChatEnabled(true);
-        setStatusText("Repository ready — ask questions now.");
-      }
-    } catch {}
+      const data = await getRepositories();
+      setRepositories(Array.isArray(data) ? data : data?.repositories || []);
+    } catch {
+      setRepositories([]);
+    }
   }
 
   async function loadConversations() {
@@ -82,6 +111,8 @@ export default function AppPage() {
           setProgress(100);
           setChatEnabled(true);
           setStatusText("Repository ready — ask questions now.");
+          setSelectedRepo((prev) => prev || data.indexed_repo_name || null);
+          await loadRepositories();
           setMessages((prev) => {
             if (prev.some((m) => m.role === "assistant")) return prev;
             return [
@@ -102,6 +133,18 @@ export default function AppPage() {
   }, [stopPolling]);
 
   async function handleProcess(repoUrl) {
+    const repoName = extractRepoName(repoUrl);
+    const existing = repositories.find((r) => r.repo_name === repoName);
+    if (existing) {
+      setActiveConvId(null);
+      setMessages([]);
+      setPhase("ready");
+      setChatEnabled(true);
+      setSelectedRepo(existing.repo_name);
+      setStatusText("Repo already indexed — opened a new chat.");
+      return;
+    }
+
     setMessages([]);
     setPhase("processing");
     setChatEnabled(false);
@@ -137,8 +180,8 @@ export default function AppPage() {
   async function handleSelectConversation(convId) {
     setActiveConvId(convId);
     try {
-      const res = await fetch(`/api/conversations/${convId}`);
-      const data = await res.json();
+      const data = await getConversation(convId);
+      setSelectedRepo(data.repo_name || null);
       setMessages(
         (data.messages || []).map((m) => ({
           id: m.id,
@@ -156,6 +199,7 @@ export default function AppPage() {
   async function handleNewChat() {
     setActiveConvId(null);
     setMessages([]);
+    setSelectedRepo(null);
     setPhase("idle");
     setProgress(0);
     setChatEnabled(false);
@@ -203,6 +247,7 @@ export default function AppPage() {
         body: JSON.stringify({
           message: userMsg,
           conversation_id: activeConvId,
+          repo_name: selectedRepo,
         }),
         signal: abortRef.current.signal,
       });
@@ -271,42 +316,80 @@ export default function AppPage() {
       <div className="flex flex-col h-full">
         {phase === "ready" ? (
           <>
-            <div className="border-b-2 border-base-300 px-6 py-3 flex items-center justify-between">
-              <h1 className="font-bold text-sm uppercase tracking-wider">
-                Chat
-              </h1>
-              <span className="font-mono text-xs text-primary uppercase">
+            <div className="border-b-2 border-base-300 px-6 py-3 flex items-center justify-between gap-4">
+              <div className="flex items-center gap-4 min-w-0">
+                <h1 className="font-bold text-sm uppercase tracking-wider shrink-0">
+                  Chat
+                </h1>
+                <span className="font-mono text-xs text-primary uppercase truncate" title={selectedRepo || ""}>
+                  {selectedRepo ? selectedRepo : "No repo"}
+                </span>
+                <label className="flex items-center gap-2 cursor-pointer shrink-0">
+                  <span
+                    className={`font-mono text-[10px] uppercase tracking-widest ${
+                      view === "chat" ? "text-primary" : "text-base-content/40"
+                    }`}
+                  >
+                    Chat
+                  </span>
+                  <input
+                    type="checkbox"
+                    className="toggle toggle-primary toggle-sm"
+                    checked={view === "graph"}
+                    onChange={(e) => setView(e.target.checked ? "graph" : "chat")}
+                    disabled={!chatEnabled || !selectedRepo}
+                  />
+                  <span
+                    className={`font-mono text-[10px] uppercase tracking-widest ${
+                      view === "graph" ? "text-primary" : "text-base-content/40"
+                    }`}
+                  >
+                    Graph
+                  </span>
+                </label>
+              </div>
+              <span className="font-mono text-xs text-primary uppercase shrink-0">
                 {chatEnabled ? "READY" : "WAITING"}
               </span>
             </div>
 
-            <ChatMessages messages={messages} streaming={streaming} />
+            {view === "graph" ? (
+              <SymbolGraphView
+                graph={graph}
+                loading={graphLoading}
+                error={graphError}
+              />
+            ) : (
+              <>
+                <ChatMessages messages={messages} streaming={streaming} />
 
-            <form
-              onSubmit={submitMessage}
-              className="border-t-2 border-base-300 p-4"
-            >
-              <div className="join w-full max-w-4xl mx-auto">
-                <input
-                  value={draft}
-                  onChange={(e) => setDraft(e.target.value)}
-                  placeholder={
-                    chatEnabled
-                      ? "Ask about the repository..."
-                      : "Processing must complete first"
-                  }
-                  className="input input-bordered join-item w-full font-mono text-sm"
-                  disabled={!chatEnabled}
-                />
-                <button
-                  type="submit"
-                  className="btn join-item"
-                  disabled={!chatEnabled || !draft.trim()}
+                <form
+                  onSubmit={submitMessage}
+                  className="border-t-2 border-base-300 p-4"
                 >
-                  Send
-                </button>
-              </div>
-            </form>
+                  <div className="join w-full max-w-4xl mx-auto">
+                    <input
+                      value={draft}
+                      onChange={(e) => setDraft(e.target.value)}
+                      placeholder={
+                        chatEnabled
+                          ? "Ask about the repository..."
+                          : "Processing must complete first"
+                      }
+                      className="input input-bordered join-item w-full font-mono text-sm"
+                      disabled={!chatEnabled}
+                    />
+                    <button
+                      type="submit"
+                      className="btn join-item"
+                      disabled={!chatEnabled || !draft.trim()}
+                    >
+                      Send
+                    </button>
+                  </div>
+                </form>
+              </>
+            )}
           </>
         ) : (
           <div className="flex-1 flex items-center justify-center p-8">
@@ -324,14 +407,6 @@ export default function AppPage() {
                 <ProgressBar progress={progress} statusText={statusText} />
               ) : (
                 <RepoInput onProcess={handleProcess} disabled={phase === "processing"} />
-              )}
-
-              {phase === "idle" && conversations.length > 0 && (
-                <div className="text-center">
-                  <p className="text-xs font-mono uppercase tracking-wider text-base-content/40">
-                    Or select a past conversation from the sidebar
-                  </p>
-                </div>
               )}
             </div>
           </div>

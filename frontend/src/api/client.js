@@ -76,6 +76,19 @@ export async function getRepositories() {
   return data;
 }
 
+export async function getRepoGraph(repoName) {
+  const { data } = await client.get(`/repositories/${encodeURIComponent(repoName)}/graph`);
+  return data;
+}
+
+export async function getFileSummary(repoName, filePath) {
+  const { data } = await client.get(
+    `/repositories/${encodeURIComponent(repoName)}/summary`,
+    { params: { file_path: filePath } }
+  );
+  return data;
+}
+
 export async function getProfile() {
   const { data } = await client.get("/users/me");
   return data;

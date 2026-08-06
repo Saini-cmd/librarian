@@ -11,7 +11,10 @@
   "dependencies": {
     "@clerk/clerk-react": "^5.61.9",
     "@gsap/react": "^2.1.2",
+    "@xyflow/react": "^12.11.2",
     "axios": "^1.18.1",
+    "d3-force": "^3.0.0",
+    "d3-hierarchy": "^3.1.2",
     "dompurify": "^3.0.11",
     "gsap": "^3.15.0",
     "marked": "^5.1.1",

@@ -14,6 +14,10 @@ Page-level components mapped to routes. Each page composes components from `src/
 - Protected routes are enforced by `ProtectedRoute` wrapper in `src/App.jsx` — not by the pages themselves
 - `AppPage` handles the full app state machine: idle → processing → ready (chat)
 - `AppPage` owns SSE streaming, status polling, conversation CRUD, message state
+- Chat is repo-aware: `AppPage` loads `GET /api/repositories` and sends `repo_name` with each message; the chat header shows the active repo as static text (no in-chat repo switching)
+- Header has a Chat ⇄ Graph toggle switch; Graph view fetches `getRepoGraph(selectedRepo)` lazily (cached per repo in state) and renders `SymbolGraphView`; chat messages are preserved when switching views
+- The landing view for all users is the repo-input (start) page; the side pane lists the user's past conversations for navigation, and the single `+ Ingest New Repo` button returns to the start page
+- No re-ingest: pasting a repo URL whose name already exists in `repositories` skips `/api/process` and opens a fresh chat on it directly; the backend independently short-circuits known repos
 - Settings page reads user profile from `GET /api/users/me` and writes via `PATCH /api/users/me`
 
 ## Work Guidance

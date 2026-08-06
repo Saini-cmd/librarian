@@ -25,7 +25,7 @@ export default function Sidebar({
           className="btn btn-block btn-outline btn-sm"
           onClick={onNewChat}
         >
-          + New Chat
+          + Ingest New Repo
         </button>
       </div>
 
