@@ -1,3 +1,4 @@
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -23,6 +24,11 @@ def repo_name_from_url(repo_url: str) -> str:
     parsed = urlparse(repo_url.strip())
     name = Path(parsed.path).name
     return name[:-4] if name.endswith(".git") else name or "repo"
+
+
+def default_conversation_title(repo_name: str | None = None) -> str:
+    ts = datetime.now().strftime("%b %d, %H:%M:%S")
+    return f"{repo_name} · {ts}" if repo_name else f"Chat · {ts}"
 
 
 def collection_exists(collection_name: str = COLLECTION_NAME) -> bool:
@@ -97,6 +103,16 @@ def user_repo_exists(db: Session, user_id: Any, repo_name: str) -> bool:
     )
 
 
+def last_indexed_repo_for_user(db: Session, user_id: Any) -> str | None:
+    repo = (
+        db.query(UserRepo)
+        .filter(UserRepo.user_id == user_id)
+        .order_by(UserRepo.updated_at.desc())
+        .first()
+    )
+    return repo.repo_name if repo else None
+
+
 def record_user_repo(
     db: Session,
     user_id: Any,
@@ -125,6 +141,27 @@ def record_user_repo(
 # ---- Conversations ----
 
 
+def resolve_conversation_repo(
+    db: Session,
+    user_id: Any,
+    conversation_id: Any,
+    requested_repo: str | None,
+) -> str | None:
+    """Resolve the repo a chat should search over.
+
+    Precedence: the conversation's stored repo (if continuing one) > the
+    repo the client requested > the last globally indexed repo.
+    """
+    repo_name = requested_repo
+    if conversation_id is not None:
+        conv = db.get(Conversation, conversation_id)
+        if conv is not None and conv.user_id == user_id and conv.repo_name:
+            repo_name = conv.repo_name
+    if not repo_name:
+        repo_name = pipeline_state_dict(db).get("indexed_repo_name")
+    return repo_name
+
+
 def get_or_create_conversation(
     db: Session,
     user_id: Any,
@@ -139,7 +176,7 @@ def get_or_create_conversation(
             return conv
     conv = Conversation(
         user_id=user_id,
-        title=title or "New chat",
+        title=title or default_conversation_title(repo_name),
         repo_name=repo_name,
         repo_url=repo_url,
     )

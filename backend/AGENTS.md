@@ -11,24 +11,28 @@ FastAPI server providing REST API for repo ingestion, chat, users, conversations
 - `models.py` — ORM models: `User`, `Conversation`, `Message`, `UserRepo`, `PipelineState`, `FileSummary`, `QaRecord`
 - `routers/users.py` — `GET/PATCH /api/users/me` with lazy Clerk user upsert
 - `routers/conversations.py` — Conversation CRUD + nested messages
-- `routers/repositories.py` — `GET /api/repositories` (user's indexed repos)
+- `routers/repositories.py` — `GET /api/repositories` (user's indexed repos), `GET /api/repositories/{repo}/graph` (symbol graph via `symbol_graph`), `GET /api/repositories/{repo}/summary` (stored file summary via `SummaryStore`)
 
 ## Local Contracts
 - All API paths prefixed with `/api` (proxied by Vite dev server)
 - Clerk JWT required on protected routes (`Depends(get_current_user)`); 401 on invalid/missing
 - DB: sync SQLAlchemy + psycopg2; tables auto-created at startup via `create_all` (Alembic deferred)
 - Pipeline state persisted in single-row `pipeline_state` table (replaces old in-memory `APP_STATE` + marker/index files)
-- Chat persists `Message` rows; conversation auto-created when `conversation_id` is null (title = first message)
+- Chat persists `Message` rows; conversation auto-created when `conversation_id` is null (title = `repo_name · timestamp` of first message via `default_conversation_title`, so the same repo in separate chats gets distinct names)
 - QA answers stored as `QaRecord` rows (replaces `data/responses/latest.md`)
 - `reset` wipes Qdrant collection + `user_repos`, `file_summaries`, `qa_records`, `pipeline_state`; preserves users and conversation history
 - `collection_exists` fails safe (returns `False`) when Qdrant is unreachable
 - Endpoints:
   - `GET /api/health` — health check (no auth)
-  - `GET /api/status` — pipeline state + Qdrant collection status (no auth)
+  - `GET /api/status` — pipeline state + Qdrant collection status (auth optional; when authenticated, `indexed_repo_name`/`ready` are derived from the caller's own repos via `last_indexed_repo_for_user`, preventing cross-user repo leakage)
   - `POST /api/reset` — wipe Qdrant + index data (no auth — should be protected)
   - `POST /api/process` — ingest repo (auth required)
   - `POST /api/chat` — query → retrieve → generate, persists messages (auth required)
   - `POST /api/chat/stream` — SSE streaming chat, persists messages (auth required)
+  - `GET /api/repositories/{repo}/graph` — symbol graph for a repo (auth, repo ownership checked)
+  - `GET /api/repositories/{repo}/summary?file_path=` — stored per-file summary via `SummaryStore` (auth, repo ownership checked)
+- Chat is repo-aware: `/api/chat` and `/api/chat/stream` accept optional `repo_name`; the effective repo is resolved via `resolve_conversation_repo` (conversation's stored repo > requested > last globally indexed) and scopes retrieval to that repo's chunks
+- Symbol graphs are built by the `symbol_graph/` module and cached; `/api/reset` calls `clear_graph_cache()`
 
 ## Work Guidance
 - Adding a new router: create file in `routers/`, mount in `main.py`

@@ -6,7 +6,7 @@ import tiktoken
 from chunking.chunk_model import CodeChunk
 
 
-DEFAULT_MAX_TOKENS = 512
+DEFAULT_MAX_TOKENS = 400
 _ENCODING = "cl100k_base"
 
 

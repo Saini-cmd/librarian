@@ -3,6 +3,7 @@ from typing import Any
 
 from langchain_community.retrievers import BM25Retriever
 from langchain_core.documents import Document
+from qdrant_client.models import FieldCondition, Filter, MatchValue
 
 from chunking.chunk_model import CodeChunk
 from vector_store.indexer import chunk_from_payload
@@ -22,17 +23,23 @@ class BM25Index:
         self.top_k = top_k
         self.client = QdrantManager().get_client()
 
-        self._retriever: BM25Retriever | None = None
+        self._retrievers: dict[str | None, BM25Retriever | None] = {}
 
-    def search(self, query: str, top_k: int | None = None) -> list[dict[str, Any]]:
-        if self._retriever is None:
-            self._retriever = self._build()
+    def search(
+        self,
+        query: str,
+        top_k: int | None = None,
+        repo_name: str | None = None,
+    ) -> list[dict[str, Any]]:
+        if repo_name not in self._retrievers:
+            self._retrievers[repo_name] = self._build(repo_name)
 
-        if self._retriever is None:
+        retriever = self._retrievers[repo_name]
+        if retriever is None:
             return []
 
         limit = top_k or self.top_k
-        docs = self._retriever.invoke(query)[:limit]
+        docs = retriever.invoke(query)[:limit]
 
         results: list[dict[str, Any]] = []
         for rank, doc in enumerate(docs, start=1):
@@ -52,8 +59,8 @@ class BM25Index:
         logger.info("BM25 retrieval returned %d results", len(results))
         return results
 
-    def _build(self) -> BM25Retriever | None:
-        chunks = self._load_chunks_from_qdrant()
+    def _build(self, repo_name: str | None = None) -> BM25Retriever | None:
+        chunks = self._load_chunks_from_qdrant(repo_name)
         if not chunks:
             logger.warning("BM25 build skipped: no chunks available")
             return None
@@ -68,15 +75,21 @@ class BM25Index:
         logger.info("BM25 index built with %d chunks", len(chunks))
         return retriever
 
-    def _load_chunks_from_qdrant(self) -> list[CodeChunk]:
+    def _load_chunks_from_qdrant(self, repo_name: str | None = None) -> list[CodeChunk]:
         chunks: list[CodeChunk] = []
         offset = None
+        scroll_filter = None
+        if repo_name:
+            scroll_filter = Filter(
+                must=[FieldCondition(key="repo", match=MatchValue(value=repo_name))]
+            )
 
         while True:
             points, next_offset = self.client.scroll(
                 collection_name=self.collection_name,
                 limit=512,
                 offset=offset,
+                scroll_filter=scroll_filter,
                 with_payload=True,
                 with_vectors=False,
             )

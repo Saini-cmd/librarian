@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from backend.auth import get_current_user
 from backend.database import get_db
 from backend.models import Conversation, Message
-from backend.state import upsert_user
+from backend.state import default_conversation_title, upsert_user
 
 
 router = APIRouter(prefix="/api/conversations", tags=["conversations"])
@@ -82,7 +82,7 @@ def create_conversation(
     user = upsert_user(db, clerk_id)
     conv = Conversation(
         user_id=user.id,
-        title=payload.title or "New chat",
+        title=payload.title or default_conversation_title(payload.repo_name),
         repo_name=payload.repo_name,
         repo_url=payload.repo_url,
     )

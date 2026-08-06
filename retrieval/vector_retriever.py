@@ -1,12 +1,20 @@
 import logging
 from typing import Any
 
+from qdrant_client.models import FieldCondition, Filter, MatchValue
+
 from vector_store.indexer import chunk_from_payload
 from vector_store.qdrant_client import QdrantManager
 from vector_store.schema import VECTOR_NAME
 
 
 logger = logging.getLogger(__name__)
+
+
+def _repo_filter(repo_name: str | None) -> Filter | None:
+    if not repo_name:
+        return None
+    return Filter(must=[FieldCondition(key="repo", match=MatchValue(value=repo_name))])
 
 
 class VectorRetriever:
@@ -22,12 +30,19 @@ class VectorRetriever:
             top_k,
         )
 
-    def search(self, query_vector: list[float], top_k: int | None = None) -> list[dict[str, Any]]:
+    def search(
+        self,
+        query_vector: list[float],
+        top_k: int | None = None,
+        repo_name: str | None = None,
+    ) -> list[dict[str, Any]]:
         limit = top_k or self.top_k
+        query_filter = _repo_filter(repo_name)
         response = self.client.query_points(
             collection_name=self.collection_name,
             query=query_vector,
             using=VECTOR_NAME,
+            query_filter=query_filter,
             limit=limit,
             with_payload=True,
             with_vectors=False,

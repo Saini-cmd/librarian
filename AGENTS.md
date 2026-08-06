@@ -80,6 +80,70 @@ When the user requests a durable behavior change, record it here or in the relev
 
 - Always verify and keep DOX up to date with the project before and after any meaningful change
 - Use relevant installed skills (in `~/.agents/skills/`) whenever a task matches their domain
+- Conserve tokens: do NOT run `npm run build` or test suites repeatedly for verification unless explicitly asked. Prefer targeted checks (syntax parse, single-file introspection, focused smoke) and run full builds/tests only when the user requests them.
+
+## Start / Stop Runbook
+
+All commands run from the repository root. The app has three layers: infra (Docker), backend (uvicorn), frontend (Vite).
+
+### 1. Infra — Qdrant + PostgreSQL (Docker)
+
+```bash
+docker compose up -d     # start qdrant (6333) + postgres (5432) in background
+docker compose ps        # check status
+docker compose down      # stop containers (data volumes preserved)
+docker compose down -v   # stop AND wipe all data (Postgres + Qdrant volumes)
+```
+
+- Containers auto-start on boot (`restart: unless-stopped`)
+- If `docker` gives permission denied, run `sg docker -c "<command>"` or re-login after the group change
+
+### 2. Backend — FastAPI
+
+```bash
+venv/bin/uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload   # dev (hot reload)
+venv/bin/uvicorn backend.main:app --host 0.0.0.0 --port 8000             # prod-style
+```
+
+- Requires infra up (Postgres + Qdrant) — tables auto-create on startup
+- Stop with `Ctrl+C` (or `kill <pid>`)
+
+### 3. Frontend — React/Vite
+
+```bash
+cd frontend && npm run dev     # dev server on :5173, proxies /api to :8000
+cd frontend && npm run build   # production build to frontend/dist
+```
+
+- Stop with `Ctrl+C`
+
+### 4. GUI tools (browsers)
+
+```bash
+open http://localhost:6333/dashboard   # Qdrant web dashboard — browse code_chunks, points, vectors (always available when infra up)
+open http://localhost:8080             # Adminer — Postgres GUI (opt-in, tools profile)
+```
+
+- Adminer start/stop (opt-in service, does NOT run with normal `docker compose up -d`):
+  - Start: `docker compose --profile tools up -d`
+  - Stop: `docker compose stop adminer`
+- Adminer login: system `PostgreSQL`, server `postgres`, user `librarian`, password `librarian`, db `librarian`
+
+### All-in-one (dev)
+
+```bash
+./dev.sh                       # starts infra (Docker) + backend + frontend; Ctrl+C stops everything cleanly
+KEEP_INFRA=1 ./dev.sh          # same, but leaves Docker containers running on exit
+```
+
+- `dev.sh` waits for Qdrant + Postgres to be healthy before starting the backend, keeps hot reload (uvicorn `--reload`, Vite HMR), and tears down all processes + runs `docker compose down` on exit
+- Auto-falls back to `sg docker -c` if your session lacks the `docker` group
+
+### Reset app data (keep infra running)
+
+```bash
+curl -X POST http://localhost:8000/api/reset   # wipes Qdrant collection + index data, keeps users/history
+```
 
 ## Child DOX Index
 
@@ -96,6 +160,7 @@ When the user requests a durable behavior change, record it here or in the relev
 | `rag/` | Answer generation — context building, prompt construction, LLM (DeepSeek via ChatOpenAI) |
 | `reranking/` | Reranking via OpenRouter API (cohere/rerank-4-fast) |
 | `summarization/` | Per-file LLM summarization (DeepSeek via ChatOpenAI) stored in PostgreSQL |
+| `symbol_graph/` | Symbol graph builder — entity/file nodes + usage edges from Qdrant AST chunks (serves the frontend Graph view) |
 | `retrieval/` | Hybrid retrieval — dense vector + BM25 + RRF + rerank |
 | `tests/` | Smoke-test scripts for each pipeline stage |
 | `vector_store/` | Qdrant client singleton and vector management (local Docker server default; cloud/embedded dormant) |
@@ -119,6 +184,6 @@ When the user requests a durable behavior change, record it here or in the relev
 
 | Path | Purpose |
 |---|---|
-| `docker-compose.yml` | Local infra — `qdrant` (port 6333) + `postgres` (port 5432) services, named volumes |
+| `docker-compose.yml` | Local infra — `qdrant` (port 6333) + `postgres` (port 5432) services, named volumes; opt-in `tools` profile adds `adminer` (port 8080) |
 | `.env.example` | Documents every required env key (model APIs, local infra, Clerk) |
 

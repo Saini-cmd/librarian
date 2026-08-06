@@ -11,6 +11,7 @@ Embeds `CodeChunk` objects via OpenRouter API (`BAAI/bge-base-en-v1.5`) and upse
 - Embedding dimension: 768 (`BAAI/bge-base-en-v1.5`)
 - Distance metric: Cosine
 - Embedding text format includes structured metadata (repo, file, language, symbol, lines)
+- Input truncated to ≤505 BGE tokens using the model's own tokenizer (`transformers` AutoTokenizer); falls back to a 400-token tiktoken estimate if the tokenizer is unavailable — required because BGE tokenizes code more aggressively than cl100k and rejects inputs >512 tokens
 - No intermediate pickle files — chunks go directly from chunker to embedder
 - Requires `OPENROUTER_API_KEY` in `.env`
 

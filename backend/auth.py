@@ -71,3 +71,14 @@ def get_current_user(credentials: HTTPAuthorizationCredentials | None = Depends(
         raise HTTPException(status_code=401, detail="Token missing subject claim")
 
     return clerk_id
+
+
+def get_current_user_optional(
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
+) -> str | None:
+    if credentials is None:
+        return None
+    try:
+        return get_current_user(credentials)
+    except HTTPException:
+        return None

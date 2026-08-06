@@ -13,7 +13,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from backend.auth import get_current_user
+from backend.auth import get_current_user, get_current_user_optional
 from backend.database import SessionLocal, get_db, init_db
 from backend.routers import conversations, repositories, users
 from backend.state import (
@@ -21,15 +21,18 @@ from backend.state import (
     collection_exists,
     get_or_create_conversation,
     pipeline_state_dict,
+    last_indexed_repo_for_user,
     record_user_repo,
     repo_name_from_url,
     reset_index_state,
+    resolve_conversation_repo,
     save_qa_record,
     update_pipeline_state,
     upsert_user,
     user_repo_exists,
 )
 from orchestration.orchestrator import Orchestrator
+from symbol_graph.graph_builder import clear_graph_cache
 from rag.answer_generator import AnswerGenerator
 from rag.context_builder import ContextBuilder
 from rag.llm_client import LLMClient
@@ -65,6 +68,7 @@ class ProcessRequest(BaseModel):
 class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1)
     conversation_id: str | None = None
+    repo_name: str | None = None
 
 
 class ProcessResponse(BaseModel):
@@ -88,6 +92,7 @@ def health() -> dict[str, str]:
 @app.post("/api/reset")
 def reset_database(db: Session = Depends(get_db)) -> dict[str, str]:
     reset_index_state(db, wipe=True)
+    clear_graph_cache()
     return {"status": "reset", "message": "All data has been wiped."}
 
 
@@ -184,21 +189,19 @@ def chat(
     db: Session = Depends(get_db),
 ) -> ChatResponse:
     user = upsert_user(db, clerk_id)
-    state = pipeline_state_dict(db)
-    repo_name = state.get("indexed_repo_name")
 
     conv_id = _parse_conversation_id(payload.conversation_id)
+    repo_name = resolve_conversation_repo(db, user.id, conv_id, payload.repo_name)
     conversation = get_or_create_conversation(
         db,
         user_id=user.id,
         conversation_id=conv_id,
-        title=payload.message[:60],
         repo_name=repo_name,
     )
     add_message(db, conversation.id, "user", payload.message)
 
     retriever = get_retrieval_pipeline()
-    retrieved = retriever.retrieve(payload.message)
+    retrieved = retriever.retrieve(payload.message, repo_name=repo_name)
 
     result = get_answer_generator().generate(
         query=payload.message, retrieved_chunks=retrieved, stream=True
@@ -213,21 +216,19 @@ def chat(
 def chat_stream(payload: ChatRequest, clerk_id: str = Depends(get_current_user)):
     db = SessionLocal()
     user = upsert_user(db, clerk_id)
-    state = pipeline_state_dict(db)
-    repo_name = state.get("indexed_repo_name")
 
     conv_id = _parse_conversation_id(payload.conversation_id)
+    repo_name = resolve_conversation_repo(db, user.id, conv_id, payload.repo_name)
     conversation = get_or_create_conversation(
         db,
         user_id=user.id,
         conversation_id=conv_id,
-        title=payload.message[:60],
         repo_name=repo_name,
     )
     add_message(db, conversation.id, "user", payload.message)
 
     retriever = get_retrieval_pipeline()
-    retrieved = retriever.retrieve(payload.message)
+    retrieved = retriever.retrieve(payload.message, repo_name=repo_name)
 
     context_builder = ContextBuilder(max_chunks=8, token_budget=14000)
     prompt_builder = PromptBuilder()
@@ -256,8 +257,16 @@ def chat_stream(payload: ChatRequest, clerk_id: str = Depends(get_current_user))
 
 
 @app.get("/api/status")
-def status(db: Session = Depends(get_db)) -> dict[str, Any]:
+def status(
+    clerk_id: str | None = Depends(get_current_user_optional),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
     state = pipeline_state_dict(db)
+    if clerk_id:
+        user = upsert_user(db, clerk_id)
+        repo_name = last_indexed_repo_for_user(db, user.id)
+        state["indexed_repo_name"] = repo_name
+        state["ready"] = repo_name is not None
     state.update({
         "qdrant_collection": collection_exists("code_chunks"),
         "stage": state.get("message", "idle"),

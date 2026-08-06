@@ -22,6 +22,17 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
+  # Browser GUI for Postgres — opt-in via `docker compose --profile tools up -d`
+  adminer:
+    image: adminer:latest
+    container_name: librarian-adminer
+    profiles: ["tools"]
+    restart: unless-stopped
+    depends_on:
+      - postgres
+    ports:
+      - "8080:8080"
+
 volumes:
   qdrant_storage:
   postgres_data:

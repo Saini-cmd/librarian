@@ -29,9 +29,18 @@ class HybridRetriever:
         self.rrf_k = rrf_k
         self.rrf_top_k = rrf_top_k
 
-    def retrieve(self, query: str, query_vector: list[float]) -> HybridRetrievalResult:
-        vector_results = self.vector_retriever.search(query_vector, top_k=self.vector_top_k)
-        bm25_results = self.bm25_index.search(query, top_k=self.bm25_top_k)
+    def retrieve(
+        self,
+        query: str,
+        query_vector: list[float],
+        repo_name: str | None = None,
+    ) -> HybridRetrievalResult:
+        vector_results = self.vector_retriever.search(
+            query_vector, top_k=self.vector_top_k, repo_name=repo_name
+        )
+        bm25_results = self.bm25_index.search(
+            query, top_k=self.bm25_top_k, repo_name=repo_name
+        )
 
         vector_ids = [result["chunk_id"] for result in vector_results]
         bm25_ids = [result["chunk_id"] for result in bm25_results]
