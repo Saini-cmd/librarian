@@ -27,12 +27,12 @@ from backend.state import (
     reset_index_state,
     resolve_conversation_repo,
     save_qa_record,
+    save_repo_graph,
     update_pipeline_state,
     upsert_user,
     user_repo_exists,
 )
 from orchestration.orchestrator import Orchestrator
-from symbol_graph.graph_builder import clear_graph_cache
 from rag.answer_generator import AnswerGenerator
 from rag.context_builder import ContextBuilder
 from rag.llm_client import LLMClient
@@ -92,7 +92,6 @@ def health() -> dict[str, str]:
 @app.post("/api/reset")
 def reset_database(db: Session = Depends(get_db)) -> dict[str, str]:
     reset_index_state(db, wipe=True)
-    clear_graph_cache()
     return {"status": "reset", "message": "All data has been wiped."}
 
 
@@ -162,6 +161,9 @@ def process_repository(
             files_discovered=result.files_discovered,
             chunks_created=result.chunks_created,
         )
+
+        if result.graph is not None:
+            save_repo_graph(db, result.repo_name, result.graph)
 
         return ProcessResponse(
             repo_url=payload.repo_url,

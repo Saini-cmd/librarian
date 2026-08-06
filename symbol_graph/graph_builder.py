@@ -1,6 +1,5 @@
 import os
 import re
-from functools import lru_cache
 from typing import Any
 
 from qdrant_client.models import FieldCondition, Filter, MatchValue
@@ -308,7 +307,6 @@ def _resolve_import(
     return None
 
 
-@lru_cache(maxsize=16)
 def build_repo_graph(repo_name: str) -> dict[str, Any]:
     """Build a symbol graph for a repo from its AST chunks in Qdrant.
 
@@ -325,6 +323,15 @@ def build_repo_graph(repo_name: str) -> dict[str, Any]:
     of import/module/include/require statements across all supported languages.
     """
     chunks = _load_repo_chunks(repo_name)
+    return _build_graph_from_chunks(repo_name, chunks)
+
+
+def build_repo_graph_from_chunks(repo_name: str, chunks: list[Any]) -> dict[str, Any]:
+    """Build a symbol graph directly from in-memory chunks (used during ingestion)."""
+    return _build_graph_from_chunks(repo_name, chunks)
+
+
+def _build_graph_from_chunks(repo_name: str, chunks: list[Any]) -> dict[str, Any]:
     ast_chunks = [
         c
         for c in chunks
@@ -446,7 +453,3 @@ def build_repo_graph(repo_name: str) -> dict[str, Any]:
         "nodes": list(file_nodes.values()) + list(sym_nodes.values()),
         "edges": edges,
     }
-
-
-def clear_graph_cache() -> None:
-    build_repo_graph.cache_clear()

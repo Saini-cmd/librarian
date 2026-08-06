@@ -6,7 +6,7 @@ React 18 SPA for repo ingestion and chat with the RAG system. Features a brutali
 ## Ownership
 - `src/main.jsx` — React entry point, ClerkProvider + BrowserRouter
 - `src/App.jsx` — Router (/, /app, /settings), protected routes, token provider
-- `src/styles.css` — Tailwind + daisyUI import, brutalist-dark theme, scanline/noise effects
+- `src/styles.css` — Tailwind + daisyUI + typography plugin imports, brutalist-dark theme, scanline/noise effects
 - `src/pages/` — Page-level components (LandingPage, AppPage, SettingsPage)
 - `src/components/` — Reusable UI components (Sidebar, Layout, ChatMessages, etc.)
 - `src/api/client.js` — Axios instance with auth interceptor + endpoint helpers
@@ -24,7 +24,7 @@ React 18 SPA for repo ingestion and chat with the RAG system. Features a brutali
 ## Local Contracts
 - Dev server on port 5173, proxies `/api` to `http://127.0.0.1:8000`
 - Chat responses streamed via Server-Sent Events
-- Uses `marked` for markdown rendering and `dompurify` for sanitization
+- Uses `marked` for markdown rendering and `dompurify` for sanitization; assistant messages are styled with `@tailwindcss/typography` (`prose prose-invert prose-sm`) for well-spaced paragraphs/headings/lists/code/tables
 - daisyUI 5 with custom `brutalist-dark` theme — all radius 0, thick borders
 - Brutalist design system: Tactical Telemetry Dark mode, neon green accent, monospace data typography
 - API calls go through Axios instance in `src/api/client.js` with automatic Clerk Bearer token injection

@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from backend.auth import get_current_user
 from backend.database import get_db
 from backend.models import UserRepo
-from backend.state import upsert_user, user_repo_exists
+from backend.state import load_repo_graph, save_repo_graph, upsert_user, user_repo_exists
 from summarization.summary_store import SummaryStore
 from symbol_graph.graph_builder import build_repo_graph
 
@@ -68,7 +68,11 @@ def repo_graph(
 ) -> dict:
     user = upsert_user(db, clerk_id)
     _require_repo(db, user.id, repo_name)
-    return build_repo_graph(repo_name)
+    graph = load_repo_graph(db, repo_name)
+    if graph is None:
+        graph = build_repo_graph(repo_name)
+        save_repo_graph(db, repo_name, graph)
+    return graph
 
 
 @router.get("/{repo_name}/summary", response_model=FileSummaryOut)

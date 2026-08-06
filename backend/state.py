@@ -11,6 +11,7 @@ from backend.models import (
     Message,
     PipelineState,
     QaRecord,
+    RepoGraph,
     User,
     UserRepo,
 )
@@ -202,6 +203,29 @@ def save_qa_record(db: Session, repo_name: str, query: str, answer: str, citatio
     db.commit()
 
 
+# ---- Repo graphs ----
+
+
+def save_repo_graph(db: Session, repo_name: str, graph: dict) -> None:
+    row = db.get(RepoGraph, repo_name)
+    if row is None:
+        row = RepoGraph(repo_name=repo_name, graph_json=graph)
+        db.add(row)
+    else:
+        row.graph_json = graph
+    db.commit()
+
+
+def load_repo_graph(db: Session, repo_name: str) -> dict | None:
+    row = db.get(RepoGraph, repo_name)
+    return row.graph_json if row is not None else None
+
+
+def delete_all_repo_graphs(db: Session) -> None:
+    db.query(RepoGraph).delete()
+    db.commit()
+
+
 def reset_index_state(db: Session, wipe: bool = True) -> None:
     if wipe:
         try:
@@ -213,5 +237,6 @@ def reset_index_state(db: Session, wipe: bool = True) -> None:
     db.query(QaRecord).delete()
     db.query(FileSummary).delete()
     db.query(UserRepo).delete()
+    db.query(RepoGraph).delete()
     db.query(PipelineState).delete()
     db.commit()

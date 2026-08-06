@@ -4,14 +4,14 @@
 FastAPI server providing REST API for repo ingestion, chat, users, conversations, and repositories. Durable state is stored in local PostgreSQL (sync SQLAlchemy); vectors live in local Qdrant (Docker). Delegates pipeline orchestration to `orchestration/` and RAG to `rag/`.
 
 ## Ownership
-- `main.py` — FastAPI app: CORS, lifespan (`init_db`), mounts routers, core endpoints (process, chat, chat/stream, status, reset, health)
+- `main.py` — FastAPI app: CORS, lifespan (`init_db`), mounts routers, core endpoints (process, chat, chat/stream, status, reset, health); persists the ingested repo's symbol graph to `repo_graphs` after `/api/process`
 - `auth.py` — Clerk JWT verification (RS256, JWKS), `get_current_user` dependency
-- `state.py` — DB data-access helpers: pipeline state, users, repos, conversations, QA records, reset
+- `state.py` — DB data-access helpers: pipeline state, users, repos, conversations, QA records, repo graphs (`save_repo_graph`/`load_repo_graph`/`delete_all_repo_graphs`), reset
 - `database.py` — Sync SQLAlchemy engine (`DATABASE_URL`), `SessionLocal`, `Base`, `get_db`, `init_db` (create_all on startup)
-- `models.py` — ORM models: `User`, `Conversation`, `Message`, `UserRepo`, `PipelineState`, `FileSummary`, `QaRecord`
+- `models.py` — ORM models: `User`, `Conversation`, `Message`, `UserRepo`, `PipelineState`, `FileSummary`, `QaRecord`, `RepoGraph`
 - `routers/users.py` — `GET/PATCH /api/users/me` with lazy Clerk user upsert
 - `routers/conversations.py` — Conversation CRUD + nested messages
-- `routers/repositories.py` — `GET /api/repositories` (user's indexed repos), `GET /api/repositories/{repo}/graph` (symbol graph via `symbol_graph`), `GET /api/repositories/{repo}/summary` (stored file summary via `SummaryStore`)
+- `routers/repositories.py` — `GET /api/repositories` (user's indexed repos), `GET /api/repositories/{repo}/graph` (symbol graph from persisted `repo_graphs`, lazy-build + persist fallback for pre-existing repos), `GET /api/repositories/{repo}/summary` (stored file summary via `SummaryStore`)
 
 ## Local Contracts
 - All API paths prefixed with `/api` (proxied by Vite dev server)
@@ -20,7 +20,7 @@ FastAPI server providing REST API for repo ingestion, chat, users, conversations
 - Pipeline state persisted in single-row `pipeline_state` table (replaces old in-memory `APP_STATE` + marker/index files)
 - Chat persists `Message` rows; conversation auto-created when `conversation_id` is null (title = `repo_name · timestamp` of first message via `default_conversation_title`, so the same repo in separate chats gets distinct names)
 - QA answers stored as `QaRecord` rows (replaces `data/responses/latest.md`)
-- `reset` wipes Qdrant collection + `user_repos`, `file_summaries`, `qa_records`, `pipeline_state`; preserves users and conversation history
+- `reset` wipes Qdrant collection + `user_repos`, `file_summaries`, `qa_records`, `repo_graphs`, `pipeline_state`; preserves users and conversation history
 - `collection_exists` fails safe (returns `False`) when Qdrant is unreachable
 - Endpoints:
   - `GET /api/health` — health check (no auth)
@@ -29,10 +29,11 @@ FastAPI server providing REST API for repo ingestion, chat, users, conversations
   - `POST /api/process` — ingest repo (auth required)
   - `POST /api/chat` — query → retrieve → generate, persists messages (auth required)
   - `POST /api/chat/stream` — SSE streaming chat, persists messages (auth required)
-  - `GET /api/repositories/{repo}/graph` — symbol graph for a repo (auth, repo ownership checked)
+  - `GET /api/repositories/{repo}/graph` — symbol graph for a repo, served from the persisted `repo_graphs` table (auth, repo ownership checked); if no row exists (pre-persistence repo) it lazy-builds via `build_repo_graph` and persists it
   - `GET /api/repositories/{repo}/summary?file_path=` — stored per-file summary via `SummaryStore` (auth, repo ownership checked)
 - Chat is repo-aware: `/api/chat` and `/api/chat/stream` accept optional `repo_name`; the effective repo is resolved via `resolve_conversation_repo` (conversation's stored repo > requested > last globally indexed) and scopes retrieval to that repo's chunks
-- Symbol graphs are built by the `symbol_graph/` module and cached; `/api/reset` calls `clear_graph_cache()`
+- Symbol graphs are built once at ingest time by `orchestration/` (`build_repo_graph_from_chunks`) and persisted to the `repo_graphs` table via `save_repo_graph`; `GET /graph` reads the DB (no in-process cache — durable across restarts/workers). Re-ingesting an already-indexed repo is short-circuited (`user_repo_exists` in `/api/process`) so the graph is NOT rebuilt then; the only rebuild path is the lazy `GET /graph` fallback when no `repo_graphs` row exists. `/api/reset` deletes all graph rows via `delete_all_repo_graphs`
+- **Design principle: minimize re-ingestion** — re-ingesting is cost-heavy (clone + chunk + summarize + embed via OpenRouter), so the system short-circuits known repos on both frontend and backend, and prefers lazy rebuilds (graph, summaries) over pipeline re-runs
 
 ## Work Guidance
 - Adding a new router: create file in `routers/`, mount in `main.py`

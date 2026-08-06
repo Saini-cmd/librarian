@@ -128,3 +128,13 @@ class QaRecord(Base):
     answer: Mapped[str] = mapped_column(Text)
     citations: Mapped[list[dict]] = mapped_column(JSON, default=list)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
+class RepoGraph(Base):
+    __tablename__ = "repo_graphs"
+
+    repo_name: Mapped[str] = mapped_column(String(255), primary_key=True)
+    graph_json: Mapped[dict] = mapped_column(JSON)
+    built_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow
+    )

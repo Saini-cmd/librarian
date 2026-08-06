@@ -54,6 +54,50 @@ const ELK_OPTIONS = {
 
 const elk = new ELK();
 
+const LAYOUT_CACHE_MAX_NODES = 4000;
+
+function graphFingerprint(nodes, edges) {
+  const parts = [];
+  for (const n of nodes) parts.push(n.id);
+  for (const e of edges) parts.push(`${e.source}>${e.target}${e.edgeType || ""}`);
+  parts.sort();
+  let h = 0;
+  for (const s of parts) {
+    for (let j = 0; j < s.length; j += 1) h = (h * 31 + s.charCodeAt(j)) | 0;
+  }
+  return Math.abs(h).toString(36);
+}
+
+function readCachedLayout(key) {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeCachedLayout(key, positions) {
+  try {
+    localStorage.setItem(key, JSON.stringify(positions));
+  } catch {
+    // storage full or unavailable — ignore
+  }
+}
+
+function applyPositions(flowNodes, flowEdges, positions, selectedId) {
+  const byId = new Map(positions.map((p) => [p.id, p]));
+  return flowNodes.map((n) => {
+    const p = byId.get(n.id);
+    const flags = nodeFlags(n.id, selectedId, flowEdges);
+    return {
+      ...n,
+      position: { x: p ? p.x : 0, y: p ? p.y : 0 },
+      data: { ...n.data, ...flags },
+    };
+  });
+}
+
 function kindColor(kind) {
   return KIND_COLORS[kind] || KIND_COLORS.entity;
 }
@@ -185,6 +229,17 @@ function GraphFlow({ graph, selectedId, onSelect }) {
       return undefined;
     }
 
+    const repo = graph?.repo || "";
+    const cacheKey = repo ? `ua-layout:${repo}:${graphFingerprint(base.flowNodes, base.flowEdges)}` : "";
+    const cacheable = cacheKey && base.flowNodes.length <= LAYOUT_CACHE_MAX_NODES;
+
+    const cached = cacheable ? readCachedLayout(cacheKey) : null;
+    if (cached) {
+      setNodes(applyPositions(base.flowNodes, base.flowEdges, cached, selectedIdRef.current));
+      setEdges(base.flowEdges.map((ed) => edgeStyles(ed, selectedIdRef.current)));
+      return undefined;
+    }
+
     let cancelled = false;
     // Structural edges only drive the layered ranks (like their dashboard):
     // defines + imports give a clean hierarchy; dense uses/used_in edges are
@@ -218,6 +273,12 @@ function GraphFlow({ graph, selectedId, onSelect }) {
             data: { ...n.data, ...flags },
           };
         });
+        if (cacheable) {
+          writeCachedLayout(
+            cacheKey,
+            placed.map((n) => ({ id: n.id, x: n.position.x, y: n.position.y }))
+          );
+        }
         setNodes(placed);
         setEdges(base.flowEdges.map((ed) => edgeStyles(ed, selectedIdRef.current)));
         setLayouting(false);
@@ -230,7 +291,7 @@ function GraphFlow({ graph, selectedId, onSelect }) {
     return () => {
       cancelled = true;
     };
-  }, [base, setEdges, setNodes]);
+  }, [base, graph, setEdges, setNodes]);
 
   useEffect(() => {
     setNodes((nds) =>
@@ -273,7 +334,7 @@ function GraphFlow({ graph, selectedId, onSelect }) {
         </div>
       )}
 
-      <div className="absolute bottom-2 left-2 z-10 space-y-1 rounded border-2 border-base-300 bg-base-200/90 px-2.5 py-1.5 font-mono text-[9px] uppercase tracking-widest text-base-content/70">
+      <div className="absolute top-2 left-2 z-10 space-y-1 rounded border-2 border-base-300 bg-base-200/90 px-2.5 py-1.5 font-mono text-[9px] uppercase tracking-widest text-base-content/70">
         <div className="text-[8px] text-primary">Edges</div>
         <div className="flex flex-wrap gap-x-3 gap-y-1">
           {Object.entries(EDGE_COLORS).map(([type, color]) => (

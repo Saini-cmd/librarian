@@ -2,11 +2,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { getFileSummary } from "../api/client";
 import MessageContent from "./MessageContent";
-import ForceGraph3DView from "./ForceGraph3DView";
 import SymbolGraph2DView from "./SymbolGraph2DView";
 
 export default function SymbolGraphView({ graph, loading, error }) {
-  const [view, setView] = useState("2d");
   const [selected, setSelected] = useState(null);
   const [summary, setSummary] = useState("");
   const [summaryLoading, setSummaryLoading] = useState(false);
@@ -71,26 +69,6 @@ export default function SymbolGraphView({ graph, loading, error }) {
   return (
     <div className="flex-1 min-h-0 flex">
       <div className="flex-1 min-w-0 relative">
-        <div className="absolute top-2 left-2 z-20 join">
-          <button
-            type="button"
-            className={`btn btn-xs join-item font-mono uppercase ${
-              view === "2d" ? "btn-primary" : "btn-outline"
-            }`}
-            onClick={() => setView("2d")}
-          >
-            2D
-          </button>
-          <button
-            type="button"
-            className={`btn btn-xs join-item font-mono uppercase ${
-              view === "3d" ? "btn-primary" : "btn-outline"
-            }`}
-            onClick={() => setView("3d")}
-          >
-            3D
-          </button>
-        </div>
         {loading ? (
           <div className="flex items-center justify-center h-full">
             <span className="loading loading-dots loading-lg" />
@@ -103,14 +81,8 @@ export default function SymbolGraphView({ graph, loading, error }) {
           <div className="flex items-center justify-center h-full text-base-content/40 font-mono text-xs uppercase tracking-widest">
             No symbol data for this repo
           </div>
-        ) : view === "2d" ? (
-          <SymbolGraph2DView
-            graph={graph}
-            selectedId={selected?.id}
-            onSelect={handleNodeSelect}
-          />
         ) : (
-          <ForceGraph3DView
+          <SymbolGraph2DView
             graph={graph}
             selectedId={selected?.id}
             onSelect={handleNodeSelect}

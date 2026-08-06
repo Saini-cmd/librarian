@@ -13,11 +13,14 @@ Page-level components mapped to routes. Each page composes components from `src/
 - Pages compose children from `src/components/` and pass props downward
 - Protected routes are enforced by `ProtectedRoute` wrapper in `src/App.jsx` — not by the pages themselves
 - `AppPage` handles the full app state machine: idle → processing → ready (chat)
+- On ingest completion, `AppPage` does NOT inject an assistant "ready" bubble — it just flips to `ready` and lets `ChatMessages` show its centered empty-state "Ready to chat" label, which disappears on the first user message
 - `AppPage` owns SSE streaming, status polling, conversation CRUD, message state
+- Chat layout is a fixed-height viewport shell (`h-dvh overflow-hidden` on the app root): the header and the message input/send form are pinned (input never moves off-screen during streaming), and only the `ChatMessages` list scrolls internally as answers grow upward
+- Client-side message ids for newly sent messages use a monotonic ref counter (`local-{n}`) — never `Date.now()` — so streamed token updates (which match the placeholder by id) can never collide with or leak into the user's message bubble under rapid/double sends; a single `setMessages` appends both the user message and the assistant placeholder
 - Chat is repo-aware: `AppPage` loads `GET /api/repositories` and sends `repo_name` with each message; the chat header shows the active repo as static text (no in-chat repo switching)
-- Header has a Chat ⇄ Graph toggle switch; Graph view fetches `getRepoGraph(selectedRepo)` lazily (cached per repo in state) and renders `SymbolGraphView`; chat messages are preserved when switching views
+- Header: left side shows the **active repo name as the heading** (truncates); right side holds the **Chat ⇄ Graph toggle switch** (no READY/WAITING label). Graph view fetches `getRepoGraph(selectedRepo)` lazily (cached per repo in state) and renders `SymbolGraphView`; chat messages are preserved when switching views
 - The landing view for all users is the repo-input (start) page; the side pane lists the user's past conversations for navigation, and the single `+ Ingest New Repo` button returns to the start page
-- No re-ingest: pasting a repo URL whose name already exists in `repositories` skips `/api/process` and opens a fresh chat on it directly; the backend independently short-circuits known repos
+- No re-ingest: pasting a repo URL whose name already exists in `repositories` skips `/api/process` and opens a fresh chat on it directly; the backend independently short-circuits known repos. This is deliberate — re-ingestion is cost-heavy (clone + chunk + summarize + embed), so known repos are never re-run; the graph and summaries are served lazily from Postgres instead
 - Settings page reads user profile from `GET /api/users/me` and writes via `PATCH /api/users/me`
 
 ## Work Guidance

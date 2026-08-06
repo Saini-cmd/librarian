@@ -9,11 +9,18 @@ export default function ChatMessages({ messages, streaming }) {
   }, [messages, streaming]);
 
   return (
-    <div className="flex-1 overflow-y-auto p-4 space-y-4">
+    <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-4">
       {messages.length === 0 && !streaming && (
-        <p className="text-base-content/40 text-xs uppercase tracking-widest text-center pt-16">
-          Ask a question about the repository
-        </p>
+        <div className="min-h-full flex items-center justify-center">
+          <div className="text-center">
+            <p className="text-xl font-black uppercase tracking-tight text-base-content/80">
+              Ready to chat
+            </p>
+            <p className="mt-2 text-base-content/40 text-xs font-mono uppercase tracking-widest">
+              The repository is ingested — ask anything about the codebase
+            </p>
+          </div>
+        </div>
       )}
 
       {messages.map((msg) => (
@@ -28,18 +35,14 @@ export default function ChatMessages({ messages, streaming }) {
                 : "bg-base-300 text-base-content rounded-none"
             }`}
           >
-            <MessageContent role={msg.role} content={msg.content} />
+            {msg.role === "assistant" && msg.content === "" && streaming ? (
+              <span className="loading loading-dots loading-sm" />
+            ) : (
+              <MessageContent role={msg.role} content={msg.content} />
+            )}
           </div>
         </div>
       ))}
-
-      {streaming && (
-        <div className="chat chat-start">
-          <div className="chat-bubble bg-base-300 rounded-none">
-            <span className="loading loading-dots loading-sm" />
-          </div>
-        </div>
-      )}
 
       <div ref={bottomRef} />
     </div>

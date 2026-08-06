@@ -38,6 +38,7 @@ export default function AppPage() {
   const [graphError, setGraphError] = useState("");
   const abortRef = useRef(null);
   const pollRef = useRef(null);
+  const msgIdRef = useRef(0);
 
   useEffect(() => {
     loadConversations();
@@ -113,17 +114,6 @@ export default function AppPage() {
           setStatusText("Repository ready — ask questions now.");
           setSelectedRepo((prev) => prev || data.indexed_repo_name || null);
           await loadRepositories();
-          setMessages((prev) => {
-            if (prev.some((m) => m.role === "assistant")) return prev;
-            return [
-              ...prev,
-              {
-                id: Date.now(),
-                role: "assistant",
-                content: "The repository is ready. Ask me anything about the codebase.",
-              },
-            ];
-          });
           await loadConversations();
         }
       } catch {
@@ -220,14 +210,11 @@ export default function AppPage() {
 
     const userMsg = draft.trim();
     setDraft("");
+    const userMsgId = `local-${++msgIdRef.current}`;
+    const placeholderId = `local-${++msgIdRef.current}`;
     setMessages((prev) => [
       ...prev,
-      { id: Date.now(), role: "user", content: userMsg },
-    ]);
-
-    const placeholderId = Date.now() + 1;
-    setMessages((prev) => [
-      ...prev,
+      { id: userMsgId, role: "user", content: userMsg },
       { id: placeholderId, role: "assistant", content: "" },
     ]);
     setStreaming(true);
@@ -313,44 +300,38 @@ export default function AppPage() {
       onDeleteConversation={handleDeleteConversation}
       conversationsLoading={convLoading}
     >
-      <div className="flex flex-col h-full">
+      <div className="flex flex-col h-dvh overflow-hidden">
         {phase === "ready" ? (
           <>
             <div className="border-b-2 border-base-300 px-6 py-3 flex items-center justify-between gap-4">
               <div className="flex items-center gap-4 min-w-0">
-                <h1 className="font-bold text-sm uppercase tracking-wider shrink-0">
-                  Chat
-                </h1>
-                <span className="font-mono text-xs text-primary uppercase truncate" title={selectedRepo || ""}>
+                <h1 className="font-bold text-sm uppercase tracking-wider truncate" title={selectedRepo || ""}>
                   {selectedRepo ? selectedRepo : "No repo"}
-                </span>
-                <label className="flex items-center gap-2 cursor-pointer shrink-0">
-                  <span
-                    className={`font-mono text-[10px] uppercase tracking-widest ${
-                      view === "chat" ? "text-primary" : "text-base-content/40"
-                    }`}
-                  >
-                    Chat
-                  </span>
-                  <input
-                    type="checkbox"
-                    className="toggle toggle-primary toggle-sm"
-                    checked={view === "graph"}
-                    onChange={(e) => setView(e.target.checked ? "graph" : "chat")}
-                    disabled={!chatEnabled || !selectedRepo}
-                  />
-                  <span
-                    className={`font-mono text-[10px] uppercase tracking-widest ${
-                      view === "graph" ? "text-primary" : "text-base-content/40"
-                    }`}
-                  >
-                    Graph
-                  </span>
-                </label>
+                </h1>
               </div>
-              <span className="font-mono text-xs text-primary uppercase shrink-0">
-                {chatEnabled ? "READY" : "WAITING"}
-              </span>
+              <label className="flex items-center gap-2 cursor-pointer shrink-0">
+                <span
+                  className={`font-mono text-[10px] uppercase tracking-widest ${
+                    view === "chat" ? "text-primary" : "text-base-content/40"
+                  }`}
+                >
+                  Chat
+                </span>
+                <input
+                  type="checkbox"
+                  className="toggle toggle-primary toggle-sm"
+                  checked={view === "graph"}
+                  onChange={(e) => setView(e.target.checked ? "graph" : "chat")}
+                  disabled={!chatEnabled || !selectedRepo}
+                />
+                <span
+                  className={`font-mono text-[10px] uppercase tracking-widest ${
+                    view === "graph" ? "text-primary" : "text-base-content/40"
+                  }`}
+                >
+                  Graph
+                </span>
+              </label>
             </div>
 
             {view === "graph" ? (
