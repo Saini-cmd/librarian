@@ -11,10 +11,10 @@ from vector_store.schema import VECTOR_NAME
 logger = logging.getLogger(__name__)
 
 
-def _repo_filter(repo_name: str | None) -> Filter | None:
-    if not repo_name:
+def _repo_hash_filter(repo_hash: str | None = None) -> Filter | None:
+    if not repo_hash:
         return None
-    return Filter(must=[FieldCondition(key="repo", match=MatchValue(value=repo_name))])
+    return Filter(must=[FieldCondition(key="repo_hash", match=MatchValue(value=repo_hash))])
 
 
 class VectorRetriever:
@@ -34,10 +34,10 @@ class VectorRetriever:
         self,
         query_vector: list[float],
         top_k: int | None = None,
-        repo_name: str | None = None,
+        repo_hash: str | None = None,
     ) -> list[dict[str, Any]]:
         limit = top_k or self.top_k
-        query_filter = _repo_filter(repo_name)
+        query_filter = _repo_hash_filter(repo_hash)
         response = self.client.query_points(
             collection_name=self.collection_name,
             query=query_vector,

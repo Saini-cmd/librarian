@@ -1,70 +1,158 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useAuth } from "@clerk/clerk-react";
 
-import { getFileSummary } from "../api/client";
+import { getFileChunks } from "../api/client";
+import { consumeSSE } from "../api/sse";
 import MessageContent from "./MessageContent";
 import SymbolGraph2DView from "./SymbolGraph2DView";
 
-export default function SymbolGraphView({ graph, loading, error }) {
+function assembleFileCode(chunks) {
+  if (!chunks || chunks.length === 0) return "";
+  const sorted = [...chunks].sort(
+    (a, b) => a.start_line - b.start_line || b.end_line - a.end_line
+  );
+  const parts = [];
+  let covered = 0;
+  for (const chunk of sorted) {
+    if (chunk.end_line <= covered) continue;
+    const overlap = Math.max(0, covered - chunk.start_line + 1);
+    if (overlap > 0) {
+      parts.push(chunk.content.split("\n").slice(overlap).join("\n"));
+    } else {
+      parts.push(chunk.content);
+    }
+    covered = chunk.end_line;
+  }
+  return parts.join("\n");
+}
+
+export default function SymbolGraphView({ graph, loading, error, repoHash }) {
+  const { getToken } = useAuth();
   const [selected, setSelected] = useState(null);
-  const [summary, setSummary] = useState("");
-  const [summaryLoading, setSummaryLoading] = useState(false);
-  const [summaryError, setSummaryError] = useState("");
-  const typeRef = useRef(null);
-  const fetchToken = useRef(0);
+  const [fileChunks, setFileChunks] = useState([]);
+  const [fileChunksLoading, setFileChunksLoading] = useState(false);
+  const [fileChunksError, setFileChunksError] = useState("");
+  const [explainText, setExplainText] = useState("");
+  const [explainLoading, setExplainLoading] = useState(false);
+  const [explainError, setExplainError] = useState("");
+  const explainTokenRef = useRef(0);
+  const explainAbortRef = useRef(null);
 
   useEffect(() => {
-    if (typeRef.current) clearInterval(typeRef.current);
     setSelected(null);
-    setSummary("");
-    setSummaryLoading(false);
-    setSummaryError("");
-  }, [graph?.repo]);
+    setFileChunks([]);
+    setFileChunksLoading(false);
+    setFileChunksError("");
+    setExplainText("");
+    setExplainLoading(false);
+    setExplainError("");
+  }, [graph?.repo, repoHash]);
 
-  useEffect(() => () => {
-    if (typeRef.current) clearInterval(typeRef.current);
-  }, []);
+  const fileCode = useMemo(() => assembleFileCode(fileChunks), [fileChunks]);
 
-  function streamText(text) {
-    if (typeRef.current) clearInterval(typeRef.current);
-    let i = 0;
-    setSummary("");
-    typeRef.current = setInterval(() => {
-      i += 1;
-      setSummary(text.slice(0, i));
-      if (i >= text.length) {
-        clearInterval(typeRef.current);
-        typeRef.current = null;
-      }
-    }, 10);
-  }
-
-  async function handleNodeSelect(data) {
-    const token = ++fetchToken.current;
-    if (typeRef.current) clearInterval(typeRef.current);
-    setSelected(data);
-    setSummary("");
-    setSummaryError("");
-    setSummaryLoading(false);
-
-    if (!data || data.kind !== "file") return;
-
-    setSummaryLoading(true);
-    try {
-      const res = await getFileSummary(graph.repo, data.file);
-      if (token !== fetchToken.current) return;
-      setSummaryLoading(false);
-      streamText(res.summary);
-    } catch {
-      if (token !== fetchToken.current) return;
-      setSummaryLoading(false);
-      setSummaryError("No summary for this file");
+  useEffect(() => {
+    if (!selected || selected.kind !== "file") return undefined;
+    let cancelled = false;
+    setFileChunks([]);
+    setFileChunksLoading(true);
+    setFileChunksError("");
+    if (!repoHash) {
+      setFileChunksLoading(false);
+      setFileChunksError("No commit hash for this repo");
+      return undefined;
     }
+    getFileChunks(repoHash, selected.file)
+      .then((data) => {
+        if (!cancelled) setFileChunks(data || []);
+      })
+      .catch((err) => {
+        if (!cancelled) setFileChunksError(err.message || "Failed to load file code");
+      })
+      .finally(() => {
+        if (!cancelled) setFileChunksLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selected, repoHash]);
+
+  function handleNodeSelect(data) {
+    setSelected(data);
+    setFileChunks([]);
+    setExplainText("");
+    setExplainLoading(false);
+    setExplainError("");
   }
 
   const fileEntities = useMemo(() => {
     if (!graph || !selected || selected.kind !== "file") return [];
     return graph.nodes.filter((n) => n.kind !== "file" && n.file === selected.file);
   }, [graph, selected]);
+
+  const codeToExplain = selected && (selected.kind === "file" ? fileCode : selected.content);
+
+  async function handleExplain() {
+    if (!selected || !codeToExplain || explainLoading || !repoHash) return;
+    const token = ++explainTokenRef.current;
+    explainAbortRef.current?.abort();
+    const controller = new AbortController();
+    explainAbortRef.current = controller;
+    setExplainLoading(true);
+    setExplainError("");
+    setExplainText("");
+    try {
+      const headers = { "Content-Type": "application/json" };
+      const t = await getToken();
+      if (t) headers.Authorization = `Bearer ${t}`;
+
+      const res = await fetch(`/api/repositories/${encodeURIComponent(repoHash)}/explain`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          file_path: selected.file,
+          kind: selected.kind,
+          label: selected.label,
+          start_line: selected.start_line,
+          end_line: selected.end_line,
+          code: codeToExplain,
+        }),
+        signal: controller.signal,
+      });
+
+      if (!res.ok) {
+        let detail = `Explain request failed (HTTP ${res.status})`;
+        try {
+          const body = await res.json();
+          if (body.detail) detail = body.detail;
+        } catch {
+          // non-JSON error body — keep the generic message
+        }
+        throw new Error(detail);
+      }
+      if (!res.body) throw new Error("Empty response from explain endpoint");
+
+      await consumeSSE(res, (ev) => {
+        if (token !== explainTokenRef.current) return;
+        if (ev.token) setExplainText((prev) => prev + ev.token);
+        else if (ev.error) setExplainError(ev.error);
+      });
+    } catch (err) {
+      if (token === explainTokenRef.current) {
+        setExplainError(
+          err.name === "AbortError" ? "Explanation stopped" : err.message || "Explain failed"
+        );
+      }
+    } finally {
+      if (token === explainTokenRef.current) {
+        setExplainLoading(false);
+        if (explainAbortRef.current === controller) explainAbortRef.current = null;
+      }
+    }
+  }
+
+  function stopExplain() {
+    explainAbortRef.current?.abort();
+  }
 
   return (
     <div className="flex-1 min-h-0 flex">
@@ -92,39 +180,38 @@ export default function SymbolGraphView({ graph, loading, error }) {
 
       {selected && (
         <aside className="w-96 shrink-0 glass-surface border-l border-base-content/10 flex flex-col min-h-0">
-          <div className="p-4 border-b border-base-content/10 space-y-1">
-            <div className="font-mono text-[10px] uppercase tracking-widest text-primary">
-              {selected.kind}
+          <div className="p-4 border-b border-base-content/10 flex items-start justify-between gap-2">
+            <div className="min-w-0 space-y-1">
+              <div className="font-mono text-[10px] uppercase tracking-widest text-primary">
+                {selected.kind}
+              </div>
+              <h3 className="font-semibold text-sm text-base-content truncate">{selected.label}</h3>
             </div>
-            <h3 className="font-semibold text-sm text-base-content truncate">{selected.label}</h3>
-            <div className="font-mono text-[10px] text-base-content/50 truncate">
-              {selected.file}
-              {selected.start_line
-                ? `:${selected.start_line}-${selected.end_line}`
-                : ""}
-            </div>
+            <button
+              className="btn btn-sm btn-primary shrink-0"
+              onClick={handleExplain}
+              disabled={!codeToExplain || explainLoading}
+              title={codeToExplain ? "Explain this code" : "Code not available yet"}
+            >
+              {explainLoading ? (
+                <>
+                  <span className="loading loading-spinner loading-xs" />
+                  Explaining
+                </>
+              ) : (
+                "Explain"
+              )}
+            </button>
           </div>
 
           <div className="flex-1 overflow-y-auto p-4 space-y-4">
+            <div className="font-mono text-[10px] text-base-content/50 truncate" title={selected.file}>
+              {selected.file}
+              {selected.start_line ? `:${selected.start_line}-${selected.end_line}` : ""}
+            </div>
+
             {selected.kind === "file" ? (
               <>
-                <section className="space-y-2">
-                  <h4 className="font-mono text-[10px] uppercase tracking-widest text-base-content/40">
-                    File Summary
-                  </h4>
-                  {summaryLoading ? (
-                    <span className="loading loading-dots loading-sm" />
-                  ) : summaryError ? (
-                    <p className="text-xs font-mono text-base-content/50">
-                      {summaryError}
-                    </p>
-                  ) : (
-                    <div className="text-sm leading-relaxed">
-                      <MessageContent role="assistant" content={summary} />
-                    </div>
-                  )}
-                </section>
-
                 {fileEntities.length > 0 && (
                   <section className="space-y-2">
                     <h4 className="font-mono text-[10px] uppercase tracking-widest text-base-content/40">
@@ -143,6 +230,21 @@ export default function SymbolGraphView({ graph, loading, error }) {
                     </ul>
                   </section>
                 )}
+
+                <section className="space-y-2">
+                  <h4 className="font-mono text-[10px] uppercase tracking-widest text-base-content/40">
+                    Complete code
+                  </h4>
+                  {fileChunksLoading ? (
+                    <span className="loading loading-dots loading-sm" />
+                  ) : fileChunksError ? (
+                    <p className="text-xs font-mono text-base-content/50">{fileChunksError}</p>
+                  ) : (
+                    <pre className="bg-base-content/5 rounded-xl border border-base-content/10 p-3 text-xs font-mono leading-relaxed max-h-96 overflow-y-auto overflow-x-auto">
+                      <code>{fileCode || "(no code available)"}</code>
+                    </pre>
+                  )}
+                </section>
               </>
             ) : (
               <section className="space-y-2">
@@ -152,6 +254,35 @@ export default function SymbolGraphView({ graph, loading, error }) {
                 <pre className="bg-base-content/5 rounded-xl border border-base-content/10 p-3 text-xs font-mono leading-relaxed max-h-72 overflow-y-auto overflow-x-auto">
                   <code>{selected.content || "(no code available)"}</code>
                 </pre>
+              </section>
+            )}
+
+            {(explainLoading || explainText || explainError) && (
+              <section className="space-y-2 border-t border-base-content/10 pt-3">
+                <div className="flex items-center justify-between">
+                  <h4 className="font-mono text-[10px] uppercase tracking-widest text-base-content/40">
+                    Explanation
+                  </h4>
+                  {explainLoading && (
+                    <button
+                      className="btn btn-xs btn-ghost font-mono"
+                      onClick={stopExplain}
+                    >
+                      Stop
+                    </button>
+                  )}
+                </div>
+                {explainLoading && !explainText && (
+                  <span className="loading loading-dots loading-sm" />
+                )}
+                {explainError && (
+                  <p className="text-xs font-mono text-error">{explainError}</p>
+                )}
+                {explainText && (
+                  <div className="text-sm leading-relaxed">
+                    <MessageContent role="assistant" content={explainText} />
+                  </div>
+                )}
               </section>
             )}
           </div>

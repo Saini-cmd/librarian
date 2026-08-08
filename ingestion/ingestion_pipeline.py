@@ -9,12 +9,11 @@ class IngestionPipeline:
         self.scanner = FileScanner()
 
     def ingest(self, repo_url: str):
-        _, repo_name = GitHubAPIFetcher._parse_repo_url(repo_url)
         print("Cloning repository...")
         repo_path = self.fetcher.fetch_repo(repo_url)
         print("Scanning repository files...")
         files = self.scanner.scan_repository(repo_path)
         for f in files:
-            f["repo"] = repo_name
+            f["repo_url"] = repo_url
         print(f"Discovered {len(files)} code files")
         return files

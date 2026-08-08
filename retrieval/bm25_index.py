@@ -29,12 +29,12 @@ class BM25Index:
         self,
         query: str,
         top_k: int | None = None,
-        repo_name: str | None = None,
+        repo_hash: str | None = None,
     ) -> list[dict[str, Any]]:
-        if repo_name not in self._retrievers:
-            self._retrievers[repo_name] = self._build(repo_name)
+        if repo_hash not in self._retrievers:
+            self._retrievers[repo_hash] = self._build(repo_hash)
 
-        retriever = self._retrievers[repo_name]
+        retriever = self._retrievers[repo_hash]
         if retriever is None:
             return []
 
@@ -59,8 +59,8 @@ class BM25Index:
         logger.info("BM25 retrieval returned %d results", len(results))
         return results
 
-    def _build(self, repo_name: str | None = None) -> BM25Retriever | None:
-        chunks = self._load_chunks_from_qdrant(repo_name)
+    def _build(self, repo_hash: str | None = None) -> BM25Retriever | None:
+        chunks = self._load_chunks_from_qdrant(repo_hash)
         if not chunks:
             logger.warning("BM25 build skipped: no chunks available")
             return None
@@ -75,13 +75,15 @@ class BM25Index:
         logger.info("BM25 index built with %d chunks", len(chunks))
         return retriever
 
-    def _load_chunks_from_qdrant(self, repo_name: str | None = None) -> list[CodeChunk]:
+    def _load_chunks_from_qdrant(
+        self, repo_hash: str | None = None
+    ) -> list[CodeChunk]:
         chunks: list[CodeChunk] = []
         offset = None
         scroll_filter = None
-        if repo_name:
+        if repo_hash:
             scroll_filter = Filter(
-                must=[FieldCondition(key="repo", match=MatchValue(value=repo_name))]
+                must=[FieldCondition(key="repo_hash", match=MatchValue(value=repo_hash))]
             )
 
         while True:

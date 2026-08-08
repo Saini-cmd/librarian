@@ -36,16 +36,6 @@ client.interceptors.response.use(
   }
 );
 
-export async function getStatus() {
-  const { data } = await client.get("/status");
-  return data;
-}
-
-export async function processRepo(repoUrl) {
-  const { data } = await client.post("/process", { repo_url: repoUrl });
-  return data;
-}
-
 export async function resetAll() {
   const { data } = await client.post("/reset");
   return data;
@@ -76,23 +66,36 @@ export async function getRepositories() {
   return data;
 }
 
-export async function getRepoGraph(repoName) {
-  const { data } = await client.get(`/repositories/${encodeURIComponent(repoName)}/graph`);
+export async function getRepoGraph(repoHash) {
+  const { data } = await client.get(`/repositories/${encodeURIComponent(repoHash)}/graph`);
   return data;
 }
 
-export async function getFileSummary(repoName, filePath) {
+export async function getFileSummary(repoHash, filePath) {
   const { data } = await client.get(
-    `/repositories/${encodeURIComponent(repoName)}/summary`,
+    `/repositories/${encodeURIComponent(repoHash)}/summary`,
     { params: { file_path: filePath } }
   );
   return data;
 }
 
-export async function getChunk(repoName, chunkId) {
+export async function getChunk(repoHash, chunkId) {
   const { data } = await client.get(
-    `/repositories/${encodeURIComponent(repoName)}/chunks/${encodeURIComponent(chunkId)}`
+    `/repositories/${encodeURIComponent(repoHash)}/chunks/${encodeURIComponent(chunkId)}`
   );
+  return data;
+}
+
+export async function getFileChunks(repoHash, filePath) {
+  const { data } = await client.get(
+    `/repositories/${encodeURIComponent(repoHash)}/chunks`,
+    { params: { file_path: filePath } }
+  );
+  return data;
+}
+
+export async function getRepoUpdates(repoHash) {
+  const { data } = await client.get(`/repositories/${encodeURIComponent(repoHash)}/updates`);
   return data;
 }
 

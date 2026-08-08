@@ -22,13 +22,14 @@ class TokenSplitter:
     def split_to_chunks(
         self,
         src: str,
-        repo: str,
+        repo_url: str,
         file_path: str,
         absolute_path: str,
         extension: str,
         language: str,
         chunk_source: str = "text",
         start_line: int = 1,
+        repo_hash: str | None = None,
     ) -> List[CodeChunk]:
         if not src.strip():
             return []
@@ -43,7 +44,7 @@ class TokenSplitter:
             chunk_text = "\n".join(current_lines)
             chunks.append(CodeChunk(
                 chunk_id=str(uuid4()),
-                repo=repo,
+                repo_url=repo_url,
                 file_path=file_path,
                 absolute_path=absolute_path,
                 extension=extension,
@@ -54,6 +55,7 @@ class TokenSplitter:
                 start_line=split_start,
                 end_line=split_start + len(current_lines) - 1,
                 content=chunk_text,
+                repo_hash=repo_hash,
             ))
 
         for line in lines:

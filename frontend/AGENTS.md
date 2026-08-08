@@ -12,6 +12,7 @@ React 18 SPA for repo ingestion and chat with the RAG system. Themeable design-s
 - `src/pages/` — Page-level components (LandingPage, AppPage, SettingsPage)
 - `src/components/` — Reusable UI components (Sidebar, Layout, ChatMessages, etc.)
 - `src/api/client.js` — Axios instance with auth interceptor + endpoint helpers
+- `src/api/sse.js` — `consumeSSE` reader for `/api/process` + `/sync` progress streaming
 - `src/hooks/` — Custom React hooks (useMarkdown, useApi)
 - GSAP scroll animations on LandingPage sections via `useGSAP` / `useLayoutEffect` + `ScrollTrigger.batch()`
 - `vite.config.js` — Dev server config with Tailwind CSS v4 plugin and API proxy

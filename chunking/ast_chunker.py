@@ -33,7 +33,8 @@ class ASTChunker:
         file_path = file_metadata["absolute_path"]
         language = file_metadata["language"]
         extension = file_metadata["extension"]
-        repo = file_metadata.get("repo", "")
+        repo_url = file_metadata.get("repo_url", "")
+        repo_hash = file_metadata.get("repo_hash")
 
         lang_config = AST_CONFIG.get(language)
         if not lang_config:
@@ -66,13 +67,14 @@ class ASTChunker:
                 gap_text = file_content[cursor:node.start_byte]
                 gap_chunks = self.splitter.split_to_chunks(
                     src=gap_text,
-                    repo=repo,
+                    repo_url=repo_url,
                     file_path=file_metadata["file_path"],
                     absolute_path=file_path,
                     extension=extension,
                     language=language,
                     chunk_source="text",
-                    start_line=line
+                    start_line=line,
+                    repo_hash=repo_hash,
                 )
                 chunks.extend(gap_chunks)
 
@@ -83,13 +85,14 @@ class ASTChunker:
             # Split large AST node if needed
             node_chunks = self.splitter.split_to_chunks(
                 src=node_text,
-                repo=repo,
+                repo_url=repo_url,
                 file_path=file_metadata["file_path"],
                 absolute_path=file_path,
                 extension=extension,
                 language=language,
                 chunk_source="ast",
-                start_line=node_line
+                start_line=node_line,
+                repo_hash=repo_hash,
             )
 
             # Extract symbol safely
@@ -116,13 +119,14 @@ class ASTChunker:
             tail_text = file_content[cursor:]
             tail_chunks = self.splitter.split_to_chunks(
                 src=tail_text,
-                repo=repo,
+                repo_url=repo_url,
                 file_path=file_metadata["file_path"],
                 absolute_path=file_path,
                 extension=extension,
                 language=language,
                 chunk_source="text",
-                start_line=line
+                start_line=line,
+                repo_hash=repo_hash,
             )
             chunks.extend(tail_chunks)
 

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useAuth } from "@clerk/clerk-react";
 import Layout from "../components/Layout";
 import RepoInput from "../components/RepoInput";
@@ -7,14 +7,15 @@ import ChatMessages from "../components/ChatMessages";
 import CitationCard from "../components/CitationCard";
 import SymbolGraphView from "../components/SymbolGraphView";
 import {
-  getStatus,
   getConversations,
   getConversation,
   deleteConversation,
   createConversation,
   getRepositories,
   getRepoGraph,
+  getRepoUpdates,
 } from "../api/client";
+import { consumeSSE } from "../api/sse";
 
 const extractRepoName = (url) =>
   (url.replace(/\.git$/, "").split("/").pop()) || "repo";
@@ -33,6 +34,10 @@ export default function AppPage() {
   const [convLoading, setConvLoading] = useState(true);
   const [repositories, setRepositories] = useState([]);
   const [selectedRepo, setSelectedRepo] = useState(null);
+  const [selectedRepoHash, setSelectedRepoHash] = useState(null);
+  const [updatesAvailable, setUpdatesAvailable] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [syncProgress, setSyncProgress] = useState(0);
   const [view, setView] = useState("chat");
   const [graph, setGraph] = useState(null);
   const [graphRepo, setGraphRepo] = useState(null);
@@ -40,28 +45,26 @@ export default function AppPage() {
   const [graphError, setGraphError] = useState("");
   const [openCitation, setOpenCitation] = useState(null);
   const abortRef = useRef(null);
-  const pollRef = useRef(null);
   const msgIdRef = useRef(0);
 
   useEffect(() => {
     loadConversations();
     loadRepositories();
     return () => {
-      if (pollRef.current) clearInterval(pollRef.current);
       if (abortRef.current) abortRef.current.abort();
     };
   }, []);
 
   useEffect(() => {
-    if (view !== "graph" || !selectedRepo || graphRepo === selectedRepo) return;
+    if (view !== "graph" || !selectedRepoHash || graphRepo === selectedRepoHash) return;
     let cancelled = false;
     setGraphLoading(true);
     setGraphError("");
-    getRepoGraph(selectedRepo)
+    getRepoGraph(selectedRepoHash)
       .then((data) => {
         if (cancelled) return;
         setGraph(data);
-        setGraphRepo(selectedRepo);
+        setGraphRepo(selectedRepoHash);
       })
       .catch((err) => {
         if (!cancelled) setGraphError(err.message || "Failed to load graph");
@@ -72,7 +75,25 @@ export default function AppPage() {
     return () => {
       cancelled = true;
     };
-  }, [view, selectedRepo, graphRepo]);
+  }, [view, selectedRepoHash, graphRepo]);
+
+  useEffect(() => {
+    if (!selectedRepoHash) {
+      setUpdatesAvailable(false);
+      return;
+    }
+    let cancelled = false;
+    getRepoUpdates(selectedRepoHash)
+      .then((data) => {
+        if (!cancelled) setUpdatesAvailable(!!data?.updates_available);
+      })
+      .catch(() => {
+        if (!cancelled) setUpdatesAvailable(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedRepoHash]);
 
   async function loadRepositories() {
     try {
@@ -95,36 +116,6 @@ export default function AppPage() {
     }
   }
 
-  const stopPolling = useCallback(() => {
-    if (pollRef.current) {
-      clearInterval(pollRef.current);
-      pollRef.current = null;
-    }
-  }, []);
-
-  const startPolling = useCallback(() => {
-    stopPolling();
-    pollRef.current = setInterval(async () => {
-      try {
-        const data = await getStatus();
-        if (typeof data.progress === "number") setProgress(data.progress);
-        setStatusText(data.stage || data.message || "");
-        if (data.ready || data.phase === "ready") {
-          stopPolling();
-          setPhase("ready");
-          setProgress(100);
-          setChatEnabled(true);
-          setStatusText("Repository ready — ask questions now.");
-          setSelectedRepo((prev) => prev || data.indexed_repo_name || null);
-          await loadRepositories();
-          await loadConversations();
-        }
-      } catch {
-        setProgress((p) => Math.min(96, p + 2));
-      }
-    }, 2000);
-  }, [stopPolling]);
-
   async function handleProcess(repoUrl) {
     const repoName = extractRepoName(repoUrl);
     const existing = repositories.find((r) => r.repo_name === repoName);
@@ -133,6 +124,7 @@ export default function AppPage() {
       setPhase("ready");
       setChatEnabled(true);
       setSelectedRepo(existing.repo_name);
+      setSelectedRepoHash(existing.repo_hash);
       setStatusText("Repo already indexed — opened a new chat.");
       try {
         const conv = await createConversation(undefined, existing.repo_name, existing.repo_url);
@@ -162,16 +154,34 @@ export default function AppPage() {
         body: JSON.stringify({ repo_url: repoUrl }),
       });
 
-      if (!res.ok) {
+      if (!res.ok || !res.body) {
         const errText = await res.text();
         throw new Error(errText || "Pipeline request failed");
       }
 
-      const data = await res.json();
-      if (data?.conversation_id) setActiveConvId(data.conversation_id);
+      let result = null;
+      await consumeSSE(res, (event) => {
+        if (event.type === "progress") {
+          setProgress(event.progress);
+          setStatusText(event.message);
+        } else if (event.type === "result") {
+          result = event.result;
+        } else if (event.type === "error") {
+          throw new Error(event.error);
+        }
+      });
 
-      setStatusText("Repository processing started.");
-      startPolling();
+      if (result) {
+        if (result.conversation_id) setActiveConvId(result.conversation_id);
+        setSelectedRepo(result.repo_name || null);
+        setSelectedRepoHash(result.repo_hash || null);
+        setPhase("ready");
+        setChatEnabled(true);
+        setProgress(100);
+        setStatusText(result.message || "Repository ready — ask questions now.");
+        await loadRepositories();
+        await loadConversations();
+      }
     } catch (err) {
       setPhase("idle");
       setProgress(0);
@@ -185,12 +195,14 @@ export default function AppPage() {
     try {
       const data = await getConversation(convId);
       setSelectedRepo(data.repo_name || null);
+      setSelectedRepoHash(data.repo_hash || null);
       setMessages(
         (data.messages || []).map((m) => ({
           id: m.id,
           role: m.role,
           content: m.content,
           citations: m.citations || [],
+          repo_hash: m.repo_hash || null,
         }))
       );
       setPhase("ready");
@@ -205,6 +217,8 @@ export default function AppPage() {
     setMessages([]);
     setOpenCitation(null);
     setSelectedRepo(null);
+    setSelectedRepoHash(null);
+    setUpdatesAvailable(false);
     setPhase("idle");
     setProgress(0);
     setChatEnabled(false);
@@ -227,6 +241,55 @@ export default function AppPage() {
     );
   }
 
+  async function handleSync() {
+    if (!selectedRepoHash || syncing) return;
+    setSyncing(true);
+    try {
+      const headers = { "Content-Type": "application/json" };
+      if (isSignedIn) headers["Authorization"] = `Bearer ${await getToken()}`;
+      const res = await fetch(
+        `/api/repositories/${encodeURIComponent(selectedRepoHash)}/sync`,
+        { method: "POST", headers }
+      );
+      if (!res.ok || !res.body) {
+        const errText = await res.text();
+        throw new Error(errText || "Sync request failed");
+      }
+
+      let result = null;
+      await consumeSSE(res, (event) => {
+        if (event.type === "progress") {
+          setSyncProgress(event.progress);
+          setStatusText(event.message);
+        } else if (event.type === "result") {
+          result = event.result;
+        } else if (event.type === "error") {
+          throw new Error(event.error);
+        }
+      });
+
+      if (result?.status === "up_to_date") {
+        setUpdatesAvailable(false);
+        setStatusText("Repository is already up to date.");
+      } else if (result?.status === "synced") {
+        setUpdatesAvailable(false);
+        setStatusText(
+          `Synced to latest commit (${String(result.repo_hash || "").slice(0, 7)}).`
+        );
+        await loadRepositories();
+        await loadConversations();
+        if (activeConvId) await handleSelectConversation(activeConvId);
+      } else {
+        setStatusText("Sync completed.");
+      }
+    } catch (err) {
+      setStatusText(`Sync failed: ${err.message}`);
+    } finally {
+      setSyncing(false);
+      setSyncProgress(0);
+    }
+  }
+
   async function submitMessage(e) {
     e.preventDefault();
     if (!draft.trim() || !chatEnabled) return;
@@ -238,8 +301,8 @@ export default function AppPage() {
     const placeholderId = `local-${++msgIdRef.current}`;
     setMessages((prev) => [
       ...prev,
-      { id: userMsgId, role: "user", content: userMsg },
-      { id: placeholderId, role: "assistant", content: "" },
+      { id: userMsgId, role: "user", content: userMsg, repo_hash: selectedRepoHash },
+      { id: placeholderId, role: "assistant", content: "", repo_hash: selectedRepoHash },
     ]);
     setStreaming(true);
 
@@ -258,7 +321,7 @@ export default function AppPage() {
         body: JSON.stringify({
           message: userMsg,
           conversation_id: activeConvId,
-          repo_name: selectedRepo,
+          repo_hash: selectedRepoHash,
         }),
         signal: abortRef.current.signal,
       });
@@ -341,7 +404,21 @@ export default function AppPage() {
               >
                 {selectedRepo ? selectedRepo : "No repo"}
               </h1>
-              <div className="flex items-center rounded-full bg-base-content/5 p-1 shrink-0">
+              <div className="flex items-center gap-2 shrink-0">
+                {updatesAvailable && !syncing && (
+                  <span className="hidden md:inline text-xs font-medium text-warning">
+                    Update available
+                  </span>
+                )}
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-xs rounded-full"
+                  onClick={handleSync}
+                  disabled={syncing || !selectedRepoHash}
+                >
+                  {syncing ? "Syncing…" : "Sync"}
+                </button>
+                <div className="flex items-center rounded-full bg-base-content/5 p-1 shrink-0">
                 <button
                   type="button"
                   className={`px-4 py-1.5 rounded-full text-xs font-medium transition-colors ${
@@ -370,6 +447,7 @@ export default function AppPage() {
                   Graph
                 </button>
               </div>
+              </div>
             </div>
 
             {view === "graph" ? (
@@ -377,6 +455,7 @@ export default function AppPage() {
                 graph={graph}
                 loading={graphLoading}
                 error={graphError}
+                repoHash={graphRepo}
               />
             ) : (
               <>
@@ -384,6 +463,7 @@ export default function AppPage() {
                   messages={messages}
                   streaming={streaming}
                   onCitationClick={handleCitationClick}
+                  repoHash={selectedRepoHash}
                 />
 
                 {openCitation && (
@@ -439,6 +519,13 @@ export default function AppPage() {
               ) : (
                 <RepoInput onProcess={handleProcess} disabled={phase === "processing"} />
               )}
+            </div>
+          </div>
+        )}
+        {syncing && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-base-100/90 p-6">
+            <div className="w-full max-w-2xl">
+              <ProgressBar progress={syncProgress} statusText={statusText} />
             </div>
           </div>
         )}

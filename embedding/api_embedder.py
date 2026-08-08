@@ -1,6 +1,7 @@
 import logging
 import os
 import time
+from concurrent.futures import ThreadPoolExecutor
 from functools import lru_cache
 from typing import List
 
@@ -31,6 +32,7 @@ _ENCODING = "cl100k_base"
 # ("array_above_max_length"). Batch well under that cap with comfortable token
 # headroom per request (~256 x 505 tokens).
 EMBED_BATCH_SIZE = 256
+EMBED_MAX_WORKERS = 5
 EMBED_MAX_RETRIES = 3
 EMBED_RETRY_BASE_DELAY = 1.0
 _RETRYABLE_STATUSES = {429, 500, 502, 503, 504}
@@ -86,11 +88,26 @@ class APIEmbedder:
             "Content-Type": "application/json",
         }
 
-        embeddings: List[List[float]] = []
-        for i in range(0, len(truncated), EMBED_BATCH_SIZE):
-            batch = truncated[i : i + EMBED_BATCH_SIZE]
-            embeddings.extend(self._embed_batch(batch, headers))
-        return embeddings
+        batches = [
+            truncated[i : i + EMBED_BATCH_SIZE]
+            for i in range(0, len(truncated), EMBED_BATCH_SIZE)
+        ]
+        if not batches:
+            return []
+
+        # Fan out per-batch API calls (each batch is independent) across up to
+        # EMBED_MAX_WORKERS threads, matching summarization's concurrency.
+        # Results are collected by batch index so chunk<->vector order is kept.
+        with ThreadPoolExecutor(max_workers=EMBED_MAX_WORKERS) as executor:
+            future_map = {
+                executor.submit(self._embed_batch, batch, headers): i
+                for i, batch in enumerate(batches)
+            }
+            ordered: List[List[List[float]]] = [None] * len(batches)
+            for future, i in future_map.items():
+                ordered[i] = future.result()
+
+        return [vector for batch in ordered for vector in batch]
 
     def _embed_batch(self, batch: List[str], headers: dict) -> List[List[float]]:
         payload = {
@@ -142,7 +159,7 @@ class APIEmbedder:
     @staticmethod
     def _prepare_text(chunk: CodeChunk) -> str:
         return (
-            f"Repository: {chunk.repo}\n"
+            f"Repository: {chunk.repo_url}\n"
             f"File: {chunk.file_path}\n"
             f"Language: {chunk.language}\n"
             f"Symbol: {chunk.symbol}\n"

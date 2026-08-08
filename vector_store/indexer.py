@@ -1,6 +1,13 @@
 from typing import Any
 
-from qdrant_client.models import PointStruct
+from qdrant_client.models import (
+    FieldCondition,
+    Filter,
+    FilterSelector,
+    MatchAny,
+    MatchValue,
+    PointStruct,
+)
 from chunking.chunk_model import CodeChunk
 from .qdrant_client import QdrantManager
 from .schema import VECTOR_NAME, get_vector_params, get_sparse_vector_params
@@ -41,7 +48,8 @@ class VectorIndexer:
                 },
                 payload={
                     "chunk_id"      : chunk.chunk_id,
-                    "repo"          : chunk.repo,
+                    "repo_url"      : chunk.repo_url,
+                    "repo_hash"     : chunk.repo_hash,
                     "file_path"     : chunk.file_path,
                     "absolute_path" : chunk.absolute_path,
                     "extension"     : chunk.extension,
@@ -65,9 +73,86 @@ class VectorIndexer:
         print(f"[VectorIndexer] Indexed {len(points)} chunks")
 
 
+    def delete_by_repo_hash(
+        self,
+        repo_hash: str,
+        keep_chunk_ids: list[str] | None = None,
+    ) -> None:
+        """Delete all points for a commit, optionally keeping cited chunk ids.
+
+        Used by sync cleanup: delete an old commit's chunks except those a
+        `citation` row still references. repo_hash is globally unique, so the
+        commit alone scopes the deletion.
+        """
+        delete_points_by_repo_hash(repo_hash, keep_chunk_ids, self.collection_name)
+
+
+def delete_points_by_repo_hash(
+    repo_hash: str,
+    keep_chunk_ids: list[str] | None = None,
+    collection_name: str = "code_chunks",
+) -> None:
+    """Delete all Qdrant points for a commit (hash-only scoped), keeping cited ids."""
+    client = QdrantManager().get_client()
+    flt = Filter(must=[FieldCondition(key="repo_hash", match=MatchValue(value=repo_hash))])
+    if keep_chunk_ids:
+        flt.must_not = [
+            FieldCondition(key="chunk_id", match=MatchAny(any=list(keep_chunk_ids)))
+        ]
+
+    client.delete(
+        collection_name=collection_name,
+        points_selector=FilterSelector(filter=flt),
+    )
+    print(
+        f"[VectorIndexer] Deleted chunks for {repo_hash} "
+        f"(keeping {len(keep_chunk_ids or [])} cited)"
+    )
+
+
+def scroll_chunks_by_file(
+    repo_hash: str,
+    file_path: str,
+    collection_name: str = "code_chunks",
+) -> list[CodeChunk]:
+    """Return every chunk for one file in a commit, sorted by line span.
+
+    Chunks tile the file (AST symbols + text gaps), so concatenating them in
+    source order reconstructs the full file. Used by the graph panel's
+    "complete code" view.
+    """
+    client = QdrantManager().get_client()
+    flt = Filter(
+        must=[
+            FieldCondition(key="repo_hash", match=MatchValue(value=repo_hash)),
+            FieldCondition(key="file_path", match=MatchValue(value=file_path)),
+        ]
+    )
+    chunks: list[CodeChunk] = []
+    offset: object | None = None
+    while True:
+        points, next_offset = client.scroll(
+            collection_name=collection_name,
+            scroll_filter=flt,
+            limit=100,
+            offset=offset,
+            with_payload=True,
+            with_vectors=False,
+        )
+        for point in points:
+            chunk = chunk_from_payload(point.payload)
+            if chunk is not None:
+                chunks.append(chunk)
+        if not next_offset:
+            break
+        offset = next_offset
+    chunks.sort(key=lambda c: (c.start_line, c.end_line))
+    return chunks
+
+
 def chunk_from_payload(payload: dict[str, Any]) -> CodeChunk | None:
     required_keys = [
-        "chunk_id", "repo", "file_path", "absolute_path", "extension",
+        "chunk_id", "file_path", "absolute_path", "extension",
         "chunk_source", "language", "symbol", "node_type",
         "start_line", "end_line", "content",
     ]
@@ -76,7 +161,7 @@ def chunk_from_payload(payload: dict[str, Any]) -> CodeChunk | None:
 
     return CodeChunk(
         chunk_id=str(payload["chunk_id"]),
-        repo=str(payload["repo"]),
+        repo_url=str(payload.get("repo_url") or payload.get("repo") or ""),
         file_path=str(payload["file_path"]),
         absolute_path=str(payload["absolute_path"]),
         extension=str(payload["extension"]),
@@ -87,4 +172,5 @@ def chunk_from_payload(payload: dict[str, Any]) -> CodeChunk | None:
         start_line=int(payload["start_line"]),
         end_line=int(payload["end_line"]),
         content=str(payload["content"]),
+        repo_hash=payload.get("repo_hash"),
     )

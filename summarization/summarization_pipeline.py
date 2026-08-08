@@ -17,10 +17,10 @@ class SummarizationPipeline:
     def __init__(self):
         self.summarizer = FileSummarizer()
 
-    def summarize(self, files_metadata: List[Dict], repo_name: str) -> dict[str, str]:
-        if SummaryStore.exists(repo_name):
-            logger.info("Summaries already exist for %s, skipping", repo_name)
-            return SummaryStore.load(repo_name)
+    def summarize(self, files_metadata: List[Dict], repo_hash: str) -> dict[str, str]:
+        if SummaryStore.exists(repo_hash):
+            logger.info("Summaries already exist for %s, skipping", repo_hash)
+            return SummaryStore.load(repo_hash)
 
         unique_files = {
             meta["file_path"]: (meta["absolute_path"], meta.get("language", "unknown"))
@@ -29,7 +29,7 @@ class SummarizationPipeline:
 
         summaries: dict[str, str] = {}
         total = len(unique_files)
-        logger.info("Summarizing %d files for %s...", total, repo_name)
+        logger.info("Summarizing %d files for %s...", total, repo_hash)
 
         with ThreadPoolExecutor(max_workers=_MAX_WORKERS) as executor:
             future_map = {
@@ -46,6 +46,6 @@ class SummarizationPipeline:
                 except Exception:
                     logger.warning("Failed to summarize %s, skipping", rel_path)
 
-        SummaryStore.save(repo_name, summaries)
-        logger.info("Summarized %d/%d files for %s", len(summaries), total, repo_name)
+        SummaryStore.save(repo_hash, summaries)
+        logger.info("Summarized %d/%d files for %s", len(summaries), total, repo_hash)
         return summaries

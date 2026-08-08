@@ -13,7 +13,8 @@ Answer generation from retrieved code chunks. Builds context, constructs prompts
 ## Local Contracts
 - Model: configured via `DEEPSEEK_MODEL` env var (default `deepseek-chat`)
 - Token budget: 14,000 tokens for context
-- Citations include repo, file path, and line numbers
+- Citations include repo, file path, line numbers, and `repo_hash` (stable file-identity resolution — `chunk_id` is metadata only, so citations survive sync)
+- Summaries loaded by `repo_hash` (`SummaryStore.load(repo_hash)`), threaded from the conversation via `PromptBuilder.build(..., repo_hash=...)` and `AnswerGenerator.generate(..., repo_hash=...)`
 - Citations are mapped only from `[C1]`-style markers the LLM actually emits (`_map_citations`); no sources are appended when the answer cites nothing
 - Single unified pipeline
 

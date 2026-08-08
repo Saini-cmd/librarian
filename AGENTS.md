@@ -81,6 +81,7 @@ When the user requests a durable behavior change, record it here or in the relev
 - Always verify and keep DOX up to date with the project before and after any meaningful change
 - Use relevant installed skills (in `~/.agents/skills/`) whenever a task matches their domain
 - Conserve tokens: do NOT run `npm run build` or test suites repeatedly for verification unless explicitly asked. Prefer targeted checks (syntax parse, single-file introspection, focused smoke) and run full builds/tests only when the user requests them.
+- Deferred work goes to `TODO.md`: whenever the user defers something ("we'll figure it out later", "work on it later", etc.) or I suggest follow-up work not being done now, add it to `TODO.md` under the appropriate heading immediately rather than leaving it to memory.
 
 ## Start / Stop Runbook
 
@@ -101,7 +102,7 @@ docker compose down -v   # stop AND wipe all data (Postgres + Qdrant volumes)
 ### 2. Backend — FastAPI
 
 ```bash
-venv/bin/uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload   # dev (hot reload)
+venv/bin/uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload --reload-exclude 'data/*' --reload-exclude 'frontend/dist/*'   # dev (hot reload)
 venv/bin/uvicorn backend.main:app --host 0.0.0.0 --port 8000             # prod-style
 ```
 
@@ -152,12 +153,12 @@ curl -X POST http://localhost:8000/api/reset   # wipes Qdrant collection + index
 
 | Path | Purpose |
 |---|---|
-| `backend/` | FastAPI server — REST API for repo ingestion, chat, users, conversations, repos; PostgreSQL-backed state (sync SQLAlchemy) |
+| `backend/` | FastAPI server — REST API for repo ingestion, chat, users, conversations, repos, and **sync/diff**; repo identity = normalized `repo_url` + per-commit `repo_hash`; PostgreSQL-backed state (sync SQLAlchemy, 7 tables; schema in `DB_SCHEMA.md`) |
 | `chunking/` | Semantic code chunking (AST + text) — no pickle, no summaries |
 | `embedding/` | Embedding pipeline — vectorize chunks via OpenRouter API and upsert to Qdrant |
 | `frontend/` | React 18 SPA — daisyUI 5 + Tailwind CSS 4, brutalist dark theme, router-based pages (Landing, App, Settings), Axios API client with Clerk auth |
 | `ingestion/` | Git clone (shallow, depth=1) + file scanning for downstream chunking |
-| `orchestration/` | Pipeline orchestrator — clone → chunk → summarize → embed → cleanup |
+| `orchestration/` | Pipeline orchestrator — clone → scan → **summarize ∥ (chunk → embed)** → graph → cleanup |
 | `rag/` | Answer generation — context building, prompt construction, LLM (DeepSeek via ChatOpenAI) |
 | `reranking/` | Reranking via OpenRouter API (cohere/rerank-4-fast) |
 | `summarization/` | Per-file LLM summarization (DeepSeek via ChatOpenAI) stored in PostgreSQL |
@@ -173,11 +174,10 @@ curl -X POST http://localhost:8000/api/reset   # wipes Qdrant collection + index
 | `data/` | Runtime artifacts (cloned repos — transient, cleaned after ingest); durable data lives in PostgreSQL/Qdrant |
 | `qdrant_db/` | Qdrant persistent storage (auto-managed) |
 | `venv/` | Python virtual environment (not tracked) |
-| `.env` | Environment configuration (secrets, endpoints) |
-| `.env.local` | Local override env (Clerk secret key) — not tracked |
-| `final-plan.md` | Implementation plan artifact — not durable code |
-| `PLAN.md` | Outdated planning doc — kept for reference |
-| `ACTIONS.md` | Scratchpad — not tracked |
+| `.env` | Backend env file — all backend secrets/config (model APIs, infra, Clerk). Not tracked; loaded via `load_dotenv()` from the repo root. Schema documented in `.env.example` |
+| `frontend/.env` | Frontend env file — `VITE_*` vars for Vite (e.g. `VITE_CLERK_PUBLISHABLE_KEY`); not tracked, read by Vite from the frontend dir |
+| `DB_SCHEMA.md` | Working reference for the Postgres data model (7 tables) — not durable code |
+| `TODO.md` | Task tracker — remaining sync-feature work + side tasks (replaces the removed `PLAN.md`); schema/identity reference lives in `DB_SCHEMA.md` |
 | `dev.sh` | Dev startup script — convenience only |
 | `.agents/` | Agent skills and configurations (installed by `npx skills`) |
 

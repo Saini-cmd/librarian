@@ -96,7 +96,8 @@ echo "dev.sh: starting backend (uvicorn, hot reload) on :8000 ..."
   set -o pipefail
   {
     source "${ROOT_DIR}/venv/bin/activate"
-    exec venv/bin/uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
+    exec venv/bin/uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload \
+      --reload-exclude 'data/*' --reload-exclude 'frontend/dist/*'
   } 2>&1 | sed -u "s/^/${B_PREFIX}/"
 ) &
 BACKEND_PID=$!

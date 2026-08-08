@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import json
+import logging
+import threading
 import uuid
 from contextlib import asynccontextmanager
 from dataclasses import asdict
 from functools import lru_cache
+from queue import Empty, Queue
 from typing import Any
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
@@ -20,18 +23,17 @@ from backend.state import (
     add_message,
     collection_exists,
     get_or_create_conversation,
-    pipeline_state_dict,
+    get_or_create_indexed_repo,
+    indexed_repo_by_hash,
     last_indexed_repo_for_user,
-    record_user_repo,
-    repo_name_from_url,
+    normalize_repo_url,
     reset_index_state,
     resolve_conversation_repo,
-    save_qa_record,
     save_repo_graph,
-    update_pipeline_state,
     upsert_user,
-    user_repo_exists,
+    write_citations,
 )
+from ingestion.github_api_fetcher import GitHubAPIFetcher
 from orchestration.orchestrator import Orchestrator
 from rag.answer_generator import AnswerGenerator
 from rag.context_builder import ContextBuilder
@@ -40,13 +42,28 @@ from rag.prompt_builder import PromptBuilder
 from retrieval.retrieval_pipeline import RetrievalPipeline
 
 
+logger = logging.getLogger(__name__)
+
+
+def _sse(data: dict) -> str:
+    return f"data: {json.dumps(data)}\n\n"
+
+
+def _sse_response(events: list[dict]) -> StreamingResponse:
+    def gen():
+        for event in events:
+            yield _sse(event)
+
+    return StreamingResponse(gen(), media_type="text/event-stream")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
     yield
 
 
-app = FastAPI(title="Librarian AI API", version="0.2.0", lifespan=lifespan)
+app = FastAPI(title="Librarian AI API", version="0.3.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -68,16 +85,7 @@ class ProcessRequest(BaseModel):
 class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1)
     conversation_id: str | None = None
-    repo_name: str | None = None
-
-
-class ProcessResponse(BaseModel):
-    repo_url: str
-    repo_name: str
-    files_discovered: int
-    chunks_created: int
-    message: str
-    conversation_id: str | None = None
+    repo_hash: str | None = None
 
 
 class ChatResponse(BaseModel):
@@ -96,108 +104,113 @@ def reset_database(db: Session = Depends(get_db)) -> dict[str, str]:
     return {"status": "reset", "message": "All data has been wiped."}
 
 
-@app.post("/api/process", response_model=ProcessResponse)
+@app.post("/api/process")
 def process_repository(
     payload: ProcessRequest,
     clerk_id: str = Depends(get_current_user),
-    db: Session = Depends(get_db),
-) -> ProcessResponse:
-    repo_name = repo_name_from_url(payload.repo_url)
+) -> StreamingResponse:
+    """Ingest a repo, streaming progress via SSE.
+
+    Probe-first: if the remote HEAD is already indexed (globally), skip the
+    pipeline and open a conversation on that commit. Otherwise the pipeline runs
+    in a background thread and emits `progress` events until a final `result`
+    (or `error`) event.
+    """
+    db = SessionLocal()
+    repo_url = normalize_repo_url(payload.repo_url)
     user = upsert_user(db, clerk_id)
 
-    if user_repo_exists(db, user.id, repo_name):
-        conv = get_or_create_conversation(
-            db,
-            user.id,
-            repo_name=repo_name,
-            repo_url=payload.repo_url,
-        )
-        update_pipeline_state(
-            db,
-            phase="ready",
-            progress=100,
-            message=f"Repository {repo_name} is already indexed.",
-            stage=f"Repository {repo_name} is already indexed.",
-            ready=True,
-            indexed_repo_name=repo_name,
-        )
-        return ProcessResponse(
-            repo_url=payload.repo_url,
-            repo_name=repo_name,
-            files_discovered=0,
-            chunks_created=0,
-            message="Repository already indexed. Reusing existing chunks and embeddings.",
-            conversation_id=str(conv.id),
-        )
-
-    update_pipeline_state(
-        db,
-        phase="processing",
-        progress=0,
-        message="Processing new repository...",
-        stage="Starting repository processing",
-        ready=False,
-    )
-
     try:
-        update_pipeline_state(
-            db,
-            phase="processing",
-            progress=5,
-            message="Starting ingestion...",
-            stage="Ingesting repository",
+        remote_hash = GitHubAPIFetcher().remote_head_sha(repo_url)
+    except Exception as exc:
+        db.close()
+        raise HTTPException(
+            status_code=502,
+            detail=f"Failed to probe remote repository. Check the URL and GITHUB_TOKEN: {exc}",
         )
 
-        orchestrator = Orchestrator()
-        result = orchestrator.run(payload.repo_url)
-
-        update_pipeline_state(
-            db,
-            phase="ready",
-            progress=100,
-            message="Repository ingested and indexed.",
-            stage="Ready for chat",
-            ready=True,
-            indexed_repo_name=result.repo_name,
-        )
-
-        record_user_repo(
-            db,
-            user_id=user.id,
-            repo_name=result.repo_name,
-            repo_url=payload.repo_url,
-            files_discovered=result.files_discovered,
-            chunks_created=result.chunks_created,
-        )
-
-        if result.graph is not None:
-            save_repo_graph(db, result.repo_name, result.graph)
-
+    existing = indexed_repo_by_hash(db, remote_hash)
+    if existing is not None:
         conv = get_or_create_conversation(
             db,
-            user.id,
-            repo_name=result.repo_name,
-            repo_url=payload.repo_url,
+            user.clerk_id,
+            repo_name=existing.repo_name,
+            repo_hash=existing.repo_hash,
         )
+        result = {
+            "repo_url": existing.repo_url,
+            "repo_name": existing.repo_name,
+            "repo_hash": existing.repo_hash,
+            "files_discovered": existing.file_count,
+            "chunks_created": existing.chunks_count,
+            "message": "Repository already indexed at this commit.",
+            "conversation_id": str(conv.id),
+        }
+        db.close()
+        return _sse_response([{"type": "result", "result": result, "done": True}])
+    db.close()
 
-        return ProcessResponse(
-            repo_url=payload.repo_url,
-            repo_name=result.repo_name,
-            files_discovered=result.files_discovered,
-            chunks_created=result.chunks_created,
-            message="Repository ingested, chunked, summarized, and embedded successfully.",
-            conversation_id=str(conv.id),
-        )
-    except Exception as e:
-        update_pipeline_state(
-            db,
-            phase="error",
-            progress=0,
-            message=f"Error: {str(e)}",
-            stage="Error occurred",
-            ready=False,
-        )
-        raise
+    progress_q: Queue = Queue()
+
+    def emit(stage: str, percent: int, message: str) -> None:
+        progress_q.put({"type": "progress", "stage": stage, "progress": percent, "message": message})
+
+    def _run() -> None:
+        db2 = SessionLocal()
+        try:
+            result_obj = Orchestrator().run(repo_url, on_progress=emit)
+            get_or_create_indexed_repo(
+                db2,
+                repo_hash=result_obj.repo_hash,
+                repo_name=result_obj.repo_name,
+                repo_url=result_obj.repo_url,
+                file_count=result_obj.files_discovered,
+                chunks_count=result_obj.chunks_created,
+                status="indexed",
+            )
+            if result_obj.graph is not None:
+                save_repo_graph(db2, result_obj.repo_hash, result_obj.graph)
+            conv = get_or_create_conversation(
+                db2,
+                user.clerk_id,
+                repo_name=result_obj.repo_name,
+                repo_hash=result_obj.repo_hash,
+            )
+            progress_q.put(
+                {
+                    "type": "result",
+                    "result": {
+                        "repo_url": result_obj.repo_url,
+                        "repo_name": result_obj.repo_name,
+                        "repo_hash": result_obj.repo_hash,
+                        "files_discovered": result_obj.files_discovered,
+                        "chunks_created": result_obj.chunks_created,
+                        "message": "Repository ingested, chunked, summarized, and embedded successfully.",
+                        "conversation_id": str(conv.id),
+                    },
+                    "done": True,
+                }
+            )
+        except Exception as exc:
+            logger.exception("Pipeline failed for %s", repo_url)
+            progress_q.put({"type": "error", "error": str(exc), "done": True})
+        finally:
+            db2.close()
+
+    threading.Thread(target=_run, daemon=True).start()
+
+    def event_stream():
+        while True:
+            try:
+                event = progress_q.get(timeout=10)
+            except Empty:
+                yield ": ping\n\n"
+                continue
+            yield _sse(event)
+            if event.get("done"):
+                break
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
 @app.post("/api/chat", response_model=ChatResponse)
@@ -209,29 +222,33 @@ def chat(
     user = upsert_user(db, clerk_id)
 
     conv_id = _parse_conversation_id(payload.conversation_id)
-    repo_name = resolve_conversation_repo(db, user.id, conv_id, payload.repo_name)
+    repo_hash, repo_name = resolve_conversation_repo(
+        db, user.clerk_id, conv_id, payload.repo_hash
+    )
     conversation = get_or_create_conversation(
         db,
-        user_id=user.id,
+        user.clerk_id,
         conversation_id=conv_id,
         repo_name=repo_name,
+        repo_hash=repo_hash,
     )
-    add_message(db, conversation.id, "user", payload.message)
+    add_message(db, conversation.id, "user", payload.message, repo_hash=repo_hash)
 
     retriever = get_retrieval_pipeline()
-    retrieved = retriever.retrieve(payload.message, repo_name=repo_name)
+    retrieved = retriever.retrieve(payload.message, repo_hash=repo_hash)
 
     result = get_answer_generator().generate(
-        query=payload.message, retrieved_chunks=retrieved, stream=True
+        query=payload.message, retrieved_chunks=retrieved, stream=True, repo_hash=repo_hash
     )
-    add_message(
+    msg = add_message(
         db,
         conversation.id,
         "assistant",
         result.answer,
-        citations=[asdict(c) for c in result.citations],
+        citation=[asdict(c) for c in result.citations],
+        repo_hash=repo_hash,
     )
-    _persist_qa(db, repo_name, payload.message, result.answer, result.citations)
+    write_citations(db, msg.id, [asdict(c) for c in result.citations])
 
     return ChatResponse(answer=result.answer, citations=[asdict(c) for c in result.citations])
 
@@ -242,24 +259,27 @@ def chat_stream(payload: ChatRequest, clerk_id: str = Depends(get_current_user))
     user = upsert_user(db, clerk_id)
 
     conv_id = _parse_conversation_id(payload.conversation_id)
-    repo_name = resolve_conversation_repo(db, user.id, conv_id, payload.repo_name)
+    repo_hash, repo_name = resolve_conversation_repo(
+        db, user.clerk_id, conv_id, payload.repo_hash
+    )
     conversation = get_or_create_conversation(
         db,
-        user_id=user.id,
+        user.clerk_id,
         conversation_id=conv_id,
         repo_name=repo_name,
+        repo_hash=repo_hash,
     )
-    add_message(db, conversation.id, "user", payload.message)
+    add_message(db, conversation.id, "user", payload.message, repo_hash=repo_hash)
 
     retriever = get_retrieval_pipeline()
-    retrieved = retriever.retrieve(payload.message, repo_name=repo_name)
+    retrieved = retriever.retrieve(payload.message, repo_hash=repo_hash)
 
     context_builder = ContextBuilder(max_chunks=8, token_budget=14000)
     prompt_builder = PromptBuilder()
     llm_client = LLMClient()
 
     context = context_builder.build(retrieved)
-    prompt_payload = prompt_builder.build(query=payload.message, context=context)
+    prompt_payload = prompt_builder.build(query=payload.message, context=context, repo_hash=repo_hash)
 
     def event_stream():
         full_answer: list[str] = []
@@ -271,15 +291,16 @@ def chat_stream(payload: ChatRequest, clerk_id: str = Depends(get_current_user))
             yield f"event: error\ndata: {json.dumps({'error': str(exc)})}\n\n"
         else:
             answer = "".join(full_answer)
-            citations = AnswerGenerator._map_citations(answer, context)
-            add_message(
+            citations = AnswerGenerator._map_citations(answer, context, repo_hash)
+            msg = add_message(
                 db,
                 conversation.id,
                 "assistant",
                 answer,
-                citations=[asdict(c) for c in citations],
+                citation=[asdict(c) for c in citations],
+                repo_hash=repo_hash,
             )
-            _persist_qa(db, repo_name, payload.message, answer, citations)
+            write_citations(db, msg.id, [asdict(c) for c in citations])
             yield f"data: {json.dumps({'citations': [asdict(c) for c in citations]})}\n\n"
         finally:
             db.close()
@@ -293,17 +314,21 @@ def status(
     clerk_id: str | None = Depends(get_current_user_optional),
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
-    state = pipeline_state_dict(db)
+    repo_name = None
     if clerk_id:
         user = upsert_user(db, clerk_id)
-        repo_name = last_indexed_repo_for_user(db, user.id)
-        state["indexed_repo_name"] = repo_name
-        state["ready"] = repo_name is not None
-    state.update({
+        repo_name = last_indexed_repo_for_user(db, user.clerk_id)
+
+    ready = repo_name is not None
+    return {
+        "phase": "ready" if ready else "idle",
+        "progress": 100 if ready else 0,
+        "message": f"Latest indexed repository: {repo_name}" if repo_name else "No repositories indexed yet.",
+        "stage": repo_name or "idle",
+        "ready": ready,
+        "indexed_repo_name": repo_name,
         "qdrant_collection": collection_exists("code_chunks"),
-        "stage": state.get("message", "idle"),
-    })
-    return state
+    }
 
 
 def _parse_conversation_id(value: str | None) -> uuid.UUID | None:
@@ -313,16 +338,6 @@ def _parse_conversation_id(value: str | None) -> uuid.UUID | None:
         return uuid.UUID(value)
     except ValueError:
         return None
-
-
-def _persist_qa(db: Session, repo_name: str | None, query: str, answer: str, citations) -> None:
-    save_qa_record(
-        db,
-        repo_name=str(repo_name or "unknown"),
-        query=query,
-        answer=answer,
-        citations=[asdict(c) for c in citations],
-    )
 
 
 @lru_cache(maxsize=1)

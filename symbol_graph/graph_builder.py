@@ -32,13 +32,15 @@ KIND_MAP = {
 }
 
 
-def _load_repo_chunks(repo_name: str) -> list[Any]:
+def _load_repo_chunks(repo_hash: str | None = None) -> list[Any]:
     client = QdrantManager().get_client()
     chunks: list[Any] = []
     offset = None
-    scroll_filter = Filter(
-        must=[FieldCondition(key="repo", match=MatchValue(value=repo_name))]
-    )
+    scroll_filter = None
+    if repo_hash:
+        scroll_filter = Filter(
+            must=[FieldCondition(key="repo_hash", match=MatchValue(value=repo_hash))]
+        )
     while True:
         points, next_offset = client.scroll(
             collection_name=COLLECTION_NAME,
@@ -309,8 +311,8 @@ def _resolve_import(
     return None
 
 
-def build_repo_graph(repo_name: str) -> dict[str, Any]:
-    """Build a symbol graph for a repo from its AST chunks in Qdrant.
+def build_repo_graph(repo_hash: str | None = None, repo_label: str | None = None) -> dict[str, Any]:
+    """Build a symbol graph for a commit from its AST chunks in Qdrant.
 
     Nodes: one per file plus one per AST entity (class/function/method/...).
     Edges:
@@ -323,17 +325,20 @@ def build_repo_graph(repo_name: str) -> dict[str, Any]:
     linking a symbol only when its name appears as an identifier in another
     chunk's code. File-level `imports` edges are added by best-effort resolution
     of import/module/include/require statements across all supported languages.
+
+    `repo_hash` scopes the graph to a specific commit (retained old-commit chunks
+    are excluded when set).
     """
-    chunks = _load_repo_chunks(repo_name)
-    return _build_graph_from_chunks(repo_name, chunks)
+    chunks = _load_repo_chunks(repo_hash)
+    return _build_graph_from_chunks(repo_label, chunks)
 
 
-def build_repo_graph_from_chunks(repo_name: str, chunks: list[Any]) -> dict[str, Any]:
+def build_repo_graph_from_chunks(repo_label: str | None, chunks: list[Any]) -> dict[str, Any]:
     """Build a symbol graph directly from in-memory chunks (used during ingestion)."""
-    return _build_graph_from_chunks(repo_name, chunks)
+    return _build_graph_from_chunks(repo_label, chunks)
 
 
-def _build_graph_from_chunks(repo_name: str, chunks: list[Any]) -> dict[str, Any]:
+def _build_graph_from_chunks(repo_label: str | None, chunks: list[Any]) -> dict[str, Any]:
     ast_chunks = [
         c
         for c in chunks
@@ -459,7 +464,7 @@ def _build_graph_from_chunks(repo_name: str, chunks: list[Any]) -> dict[str, Any
     ]
 
     return {
-        "repo": repo_name,
+        "repo": repo_label,
         "nodes": list(file_nodes.values()) + list(sym_nodes.values()),
         "edges": edges,
     }

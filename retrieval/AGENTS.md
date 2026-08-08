@@ -15,8 +15,9 @@ Hybrid retrieval pipeline combining dense vector search and BM25 keyword search 
 ## Local Contracts
 - Dense + BM25 → RRF → rerank → post-process pipeline order
 - Query embedding via `embedding.api_embedder.APIEmbedder` (OpenRouter API)
-- BM25 index built from Qdrant payloads and cached per repo (plus one shared all-repo index)
-- Retrieval scoped to a single repo via `repo_name` (Qdrant `repo` payload `FieldCondition` filter applied to both dense and BM25 paths); `repo_name=None` searches everything
+- BM25 index built from Qdrant payloads and cached per commit
+- **Hash-only scoping**: retrieval is scoped to a specific commit via `repo_hash` (Qdrant `repo_hash` payload `FieldCondition` applied to both dense and BM25 paths). `repo_hash=None` searches all commits. The repo-name/URL filter was removed — `repo_hash` is globally unique, so no repo dimension is needed
+- BM25 index cached per `repo_hash` key — a synced commit gets a fresh index automatically
 - Post-retrieval boosts `src/`, `lib/`, `core/`; penalizes `test/`, `docs/`, `examples/`
 
 ## Work Guidance

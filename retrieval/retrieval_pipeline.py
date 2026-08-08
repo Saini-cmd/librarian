@@ -55,8 +55,10 @@ class RetrievalPipeline:
         self.post_processor = PostRetrievalProcessor()
         self.reranker = OpenRouterReranker(model="cohere/rerank-4-fast")
 
-    def retrieve(self, query: str, repo_name: str | None = None) -> list[dict[str, Any]]:
-        logger.info("stage=retrieval_start repo=%s", repo_name or "all")
+    def retrieve(
+        self, query: str, repo_hash: str | None = None
+    ) -> list[dict[str, Any]]:
+        logger.info("stage=retrieval_start hash=%s", repo_hash or "all")
 
         expanded_query = self.query_expander.expand(query)
 
@@ -65,7 +67,7 @@ class RetrievalPipeline:
         retrieval_result = self.hybrid_retriever.retrieve(
             query=expanded_query,
             query_vector=query_vector,
-            repo_name=repo_name,
+            repo_hash=repo_hash,
         )
         logger.info("stage=vector_retrieved count=%d", retrieval_result.vector_count)
         logger.info("stage=bm25_retrieved count=%d", retrieval_result.bm25_count)

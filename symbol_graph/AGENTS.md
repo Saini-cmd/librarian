@@ -4,10 +4,11 @@
 Builds a symbol graph for an indexed repo from its AST chunks: nodes for files and entities (class/function/method/interface), edges showing where each entity is defined, referenced by other entities, and used across files. Serves the frontend Graph view.
 
 ## Ownership
-- `graph_builder.py` — `build_repo_graph(repo_name)` (Qdrant load path), `build_repo_graph_from_chunks(repo_name, chunks)` (in-memory path used by the orchestrator), `_build_graph_from_chunks` (shared core), `_load_repo_chunks`, reference-edge detection
+- `graph_builder.py` — `build_repo_graph(repo_hash, repo_label=None)` (Qdrant load path, scoped to a commit), `build_repo_graph_from_chunks(repo_label, chunks)` (in-memory path used by the orchestrator), `_build_graph_from_chunks` (shared core), `_load_repo_chunks`, reference-edge detection
 
 ## Local Contracts
-- Chunk source is either Qdrant `scroll` (`build_repo_graph`, same `repo` payload filter pattern as retrieval BM25) or the in-memory `CodeChunk` list from the chunker (`build_repo_graph_from_chunks`); both feed the same `_build_graph_from_chunks` core
+- Chunk source is either Qdrant `scroll` (`build_repo_graph`, same `repo_hash` payload filter pattern as retrieval BM25) or the in-memory `CodeChunk` list from the chunker (`build_repo_graph_from_chunks`); both feed the same `_build_graph_from_chunks` core
+- `repo_label` is display-only (the graph JSON `repo` field); scoping is by `repo_hash` alone (globally unique)
 - Only `chunk_source == "ast"` chunks with a symbol (len >= 2) become entity nodes; deduped by `(file, symbol)`
 - JS/TS arrow-function / function-expression components (`const X = () => …`, `export const X = function …`, class expressions) are NOT AST chunks, so they are synthesized as entities from JS/TS text chunks via `_js_component_declarations` (module-level `variable_declarator` with a function/class expression value; nested/boundary nodes skipped); an existing AST entity for the same `(file, symbol)` wins
 - File nodes are created for every file in the repo (AST and text chunks) so all `defines`/`used_in` edge targets exist; edges are filtered at output to drop self-loops or references to missing node ids (this keeps d3-force from throwing on dangling links)

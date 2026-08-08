@@ -48,6 +48,7 @@ class Citation:
     symbol: str
     language: str
     repo: str | None = None
+    repo_hash: str | None = None
 
 
 @dataclass(frozen=True)

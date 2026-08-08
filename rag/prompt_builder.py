@@ -29,16 +29,15 @@ class PromptBuilder:
             ("human", "Repository scope: {repo_hint}\n\nRetrieved context:\n{context_text}\n\nUser query:\n{query}"),
         ])
 
-    def build(self, query: str, context: ContextAssembly) -> PromptPayload:
-        repo_names = sorted({item.chunk.repo for item in context.chunks if item.chunk.repo})
+    def build(self, query: str, context: ContextAssembly, repo_hash: str | None = None) -> PromptPayload:
+        repo_names = sorted({item.chunk.repo_url for item in context.chunks if item.chunk.repo_url})
         repo_hint = ", ".join(repo_names) if repo_names else "unknown"
 
         summaries = None
-        for name in repo_names:
-            loaded = SummaryStore.load(name)
+        if repo_hash:
+            loaded = SummaryStore.load(repo_hash)
             if loaded:
                 summaries = loaded
-                break
 
         context_text = self._format_context(context, summaries)
         lc_messages = self._template.format_messages(

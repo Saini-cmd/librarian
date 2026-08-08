@@ -37,7 +37,7 @@ def main():
             print(f"RRF: {rrf_score:.6f}")
             print(f"Vector: {vector_score if vector_score is not None else 'N/A'}")
             print(f"BM25: {bm25_score if bm25_score is not None else 'N/A'}")
-            print(f"Repo: {chunk.repo}")
+            print(f"Repo: {chunk.repo_url}")
             print(f"File: {chunk.file_path}")
             print(f"Language: {chunk.language}")
             print(f"Symbol: {chunk.symbol}")

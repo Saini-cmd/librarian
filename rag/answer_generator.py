@@ -1,5 +1,6 @@
 import logging
 import re
+from dataclasses import replace
 
 from rag.context_builder import ContextBuilder
 from rag.llm_client import LLMClient
@@ -29,14 +30,15 @@ class AnswerGenerator:
         query: str,
         retrieved_chunks: list[RetrievedChunk | dict],
         stream: bool = False,
+        repo_hash: str | None = None,
     ) -> AnswerResult:
         logger.info("stage=answer_generation_start retrieved=%d", len(retrieved_chunks))
 
         context = self.context_builder.build(retrieved_chunks)
-        prompt_payload = self.prompt_builder.build(query=query, context=context)
+        prompt_payload = self.prompt_builder.build(query=query, context=context, repo_hash=repo_hash)
         llm_response = self.llm_client.generate(prompt_payload.messages, stream=stream)
 
-        citations = self._map_citations(llm_response.text, context)
+        citations = self._map_citations(llm_response.text, context, repo_hash)
 
         logger.info(
             "stage=answer_generation_done context_chunks=%d citations=%d",
@@ -53,11 +55,14 @@ class AnswerGenerator:
         )
 
     @staticmethod
-    def _map_citations(answer: str, context: ContextAssembly) -> list[Citation]:
+    def _map_citations(answer: str, context: ContextAssembly, repo_hash: str | None = None) -> list[Citation]:
         citation_ids = _CITATION_PATTERN.findall(answer)
 
         if not citation_ids:
             return []
 
         unique_ids = list(dict.fromkeys(citation_ids))
-        return [context.citations[cid] for cid in unique_ids if cid in context.citations]
+        citations = [context.citations[cid] for cid in unique_ids if cid in context.citations]
+        if repo_hash:
+            citations = [replace(c, repo_hash=repo_hash) for c in citations]
+        return citations

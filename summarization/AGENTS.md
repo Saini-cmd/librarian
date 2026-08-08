@@ -9,8 +9,8 @@ Generates per-file summaries (~100 words) using the same LLM as answer generatio
 - `summary_store.py` — DB-backed store (`SessionLocal`), static interface `exists/save/load/get`
 
 ## Local Contracts
-- Summaries stored as `(repo_name, file_path, summary_text)` rows in `file_summaries`
-- Idempotent: skips if the repo already has summaries in the DB
+- Summaries stored as `(repo_hash, file_path, summary_text)` rows in `file_summary` — keyed by the repo **commit hash**, not the repo name
+- Idempotent: skips if the commit already has summaries in the DB
 - Parallel: up to 5 concurrent LLM calls via `ThreadPoolExecutor`
 - Truncates file content to ~3000 tokens before summarization
 - Failed summaries are skipped (logged, not crashed)

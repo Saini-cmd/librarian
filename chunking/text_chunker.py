@@ -25,7 +25,8 @@ class TextChunker:
         file_path = file_metadata["absolute_path"]
         relative_path = file_metadata["file_path"]
         language = file_metadata.get("language", "unknown")
-        repo = file_metadata.get("repo", "unknown")
+        repo_url = file_metadata.get("repo_url", "unknown")
+        repo_hash = file_metadata.get("repo_hash")
         extension = Path(file_path).suffix.lower()
 
         try:
@@ -42,7 +43,7 @@ class TextChunker:
             start_line, end_line = self._estimate_lines(text, chunk_text)
             chunks.append(CodeChunk(
                 chunk_id=str(uuid.uuid4()),
-                repo=repo,
+                repo_url=repo_url,
                 file_path=relative_path,
                 absolute_path=file_path,
                 extension=extension,
@@ -53,6 +54,7 @@ class TextChunker:
                 start_line=start_line,
                 end_line=end_line,
                 content=chunk_text,
+                repo_hash=repo_hash,
             ))
 
         return chunks

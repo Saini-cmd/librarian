@@ -117,6 +117,19 @@ function edgeStyles(ed, selectedId, colors) {
   };
 }
 
+function nodeMatchesFilters(node, kindFilter, dirFilter) {
+  if (kindFilter.size > 0 && !kindFilter.has(node.kind)) return false;
+  if (dirFilter) {
+    const file = node.file || "";
+    if (dirFilter === "(root)") {
+      if (file.includes("/")) return false;
+    } else if (!file.startsWith(`${dirFilter}/`)) {
+      return false;
+    }
+  }
+  return true;
+}
+
 const NodeCard = memo(function NodeCard({ data }) {
   const { label, kind, color, selected, neighbor, faded } = data;
   return (
@@ -169,6 +182,11 @@ function GraphFlow({ graph, selectedId, onSelect }) {
   const [layouting, setLayouting] = useState(false);
   const selectedIdRef = useRef(selectedId);
   selectedIdRef.current = selectedId;
+  const [kindFilter, setKindFilter] = useState(() => new Set());
+  const [dirFilter, setDirFilter] = useState("");
+  const filtersActive = kindFilter.size > 0 || dirFilter !== "";
+  const [filterOpen, setFilterOpen] = useState(false);
+  const filterRef = useRef(null);
 
   const base = useMemo(() => {
     const gNodes = graph?.nodes ?? [];
@@ -211,21 +229,100 @@ function GraphFlow({ graph, selectedId, onSelect }) {
     return { flowNodes, flowEdges };
   }, [graph, graphTheme]);
 
+  const kinds = useMemo(() => {
+    const set = new Set();
+    for (const n of graph?.nodes ?? []) if (n.kind) set.add(n.kind);
+    return [...set].sort();
+  }, [graph]);
+
+  const dirs = useMemo(() => {
+    const set = new Set();
+    for (const n of graph?.nodes ?? []) {
+      const file = n.file || "";
+      if (!file) continue;
+      if (!file.includes("/")) {
+        set.add("(root)");
+        continue;
+      }
+      const parts = file.split("/");
+      for (let i = 1; i < parts.length; i += 1) {
+        set.add(parts.slice(0, i).join("/"));
+      }
+    }
+    return [...set].sort();
+  }, [graph]);
+
+  const matchSet = useMemo(() => {
+    if (!filtersActive) return null;
+    const ids = new Set();
+    for (const n of graph?.nodes ?? []) {
+      if (nodeMatchesFilters(n, kindFilter, dirFilter)) ids.add(n.id);
+    }
+    return ids;
+  }, [graph, kindFilter, dirFilter, filtersActive]);
+
+  const filteredBase = useMemo(() => {
+    if (!matchSet) return base;
+    const flowNodes = base.flowNodes.filter((n) => matchSet.has(n.id));
+    const flowEdges = base.flowEdges.filter(
+      (e) => matchSet.has(e.source) && matchSet.has(e.target)
+    );
+    return { flowNodes, flowEdges };
+  }, [base, matchSet]);
+
+  const filterCount = kindFilter.size + (dirFilter ? 1 : 0);
+  const matchCount = filteredBase.flowNodes.length;
+  const totalCount = base.flowNodes.length;
+  const filteredEmpty = filtersActive && matchCount === 0;
+
+  function toggleKind(kind) {
+    setKindFilter((prev) => {
+      const next = new Set(prev);
+      if (next.has(kind)) next.delete(kind);
+      else next.add(kind);
+      return next;
+    });
+  }
+
+  function clearFilters() {
+    setKindFilter(new Set());
+    setDirFilter("");
+  }
+
   useEffect(() => {
-    if (!base.flowNodes.length) {
+    setKindFilter(new Set());
+    setDirFilter("");
+  }, [graph?.repo]);
+
+  useEffect(() => {
+    if (!filterOpen) return undefined;
+    const onPointerDown = (e) => {
+      if (filterRef.current && !filterRef.current.contains(e.target)) setFilterOpen(false);
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => document.removeEventListener("pointerdown", onPointerDown);
+  }, [filterOpen]);
+
+  useEffect(() => {
+    if (!filteredBase.flowNodes.length) {
       setNodes([]);
       setEdges([]);
+      setLayouting(false);
       return undefined;
     }
 
     const repo = graph?.repo || "";
-    const cacheKey = repo ? `ua-layout:v2:${repo}:${graphFingerprint(base.flowNodes, base.flowEdges)}` : "";
-    const cacheable = cacheKey && base.flowNodes.length <= LAYOUT_CACHE_MAX_NODES;
+    const cacheKey =
+      repo && !filtersActive
+        ? `ua-layout:v2:${repo}:${graphFingerprint(filteredBase.flowNodes, filteredBase.flowEdges)}`
+        : "";
+    const cacheable = cacheKey && filteredBase.flowNodes.length <= LAYOUT_CACHE_MAX_NODES;
 
     const cached = cacheable ? readCachedLayout(cacheKey) : null;
     if (cached) {
-      setNodes(applyPositions(base.flowNodes, base.flowEdges, cached, selectedIdRef.current));
-      setEdges(base.flowEdges.map((ed) => edgeStyles(ed, selectedIdRef.current, graphTheme)));
+      setLayouting(false);
+      setNodes(applyPositions(filteredBase.flowNodes, filteredBase.flowEdges, cached, selectedIdRef.current));
+      setEdges(filteredBase.flowEdges.map((ed) => edgeStyles(ed, selectedIdRef.current, graphTheme)));
       return undefined;
     }
 
@@ -233,13 +330,13 @@ function GraphFlow({ graph, selectedId, onSelect }) {
     // Structural edges only drive the layered ranks (like their dashboard):
     // defines + imports give a clean hierarchy; dense uses/used_in edges are
     // rendered on top but don't influence placement.
-    const layoutEdges = base.flowEdges.filter(
+    const layoutEdges = filteredBase.flowEdges.filter(
       (e) => e.edgeType === "defines" || e.edgeType === "imports"
     );
     const input = {
       id: "root",
       layoutOptions: ELK_OPTIONS,
-      children: base.flowNodes.map((n) => ({
+      children: filteredBase.flowNodes.map((n) => ({
         id: n.id,
         width: NODE_WIDTH,
         height: NODE_HEIGHT,
@@ -253,9 +350,9 @@ function GraphFlow({ graph, selectedId, onSelect }) {
       .then((pos) => {
         if (cancelled) return;
         const byId = new Map(pos.children.map((c) => [c.id, c]));
-        const placed = base.flowNodes.map((n) => {
+        const placed = filteredBase.flowNodes.map((n) => {
           const p = byId.get(n.id);
-          const flags = nodeFlags(n.id, selectedIdRef.current, base.flowEdges);
+          const flags = nodeFlags(n.id, selectedIdRef.current, filteredBase.flowEdges);
           return {
             ...n,
             position: { x: p ? p.x : 0, y: p ? p.y : 0 },
@@ -269,7 +366,7 @@ function GraphFlow({ graph, selectedId, onSelect }) {
           );
         }
         setNodes(placed);
-        setEdges(base.flowEdges.map((ed) => edgeStyles(ed, selectedIdRef.current, graphTheme)));
+        setEdges(filteredBase.flowEdges.map((ed) => edgeStyles(ed, selectedIdRef.current, graphTheme)));
         setLayouting(false);
       })
       .catch(() => {
@@ -280,17 +377,17 @@ function GraphFlow({ graph, selectedId, onSelect }) {
     return () => {
       cancelled = true;
     };
-  }, [base, graph, graphTheme, setEdges, setNodes]);
+  }, [filteredBase, filtersActive, graph, graphTheme, setEdges, setNodes]);
 
   useEffect(() => {
     setNodes((nds) =>
       nds.map((n) => ({
         ...n,
-        data: { ...n.data, ...nodeFlags(n.id, selectedId, base.flowEdges) },
+        data: { ...n.data, ...nodeFlags(n.id, selectedId, filteredBase.flowEdges) },
       }))
     );
     setEdges((eds) => eds.map((ed) => edgeStyles(ed, selectedId, graphTheme)));
-  }, [selectedId, base, graphTheme, setNodes, setEdges]);
+  }, [selectedId, filteredBase, graphTheme, setNodes, setEdges]);
 
   useEffect(() => {
     if (nodes.length) {
@@ -322,6 +419,120 @@ function GraphFlow({ graph, selectedId, onSelect }) {
           <span className="loading loading-dots loading-lg" />
         </div>
       )}
+
+      {filteredEmpty && (
+        <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center">
+          <span className="rounded-xl border border-base-content/10 bg-base-100/80 px-4 py-2 font-mono text-[11px] uppercase tracking-widest text-base-content/60 backdrop-blur-md">
+            No nodes match the current filters
+          </span>
+        </div>
+      )}
+
+      <div className="absolute top-2 right-2 z-30 flex items-center gap-1">
+        {filtersActive && (
+          <button
+            className="btn btn-circle btn-sm btn-ghost border border-base-content/10"
+            title="Reset filters"
+            onClick={clearFilters}
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 20 20"
+              fill="currentColor"
+              className="h-4 w-4"
+            >
+              <path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z" />
+            </svg>
+          </button>
+        )}
+
+        <details
+          ref={filterRef}
+          className="dropdown dropdown-end"
+          open={filterOpen}
+          onToggle={(e) => setFilterOpen(e.target.open)}
+        >
+          <summary className="btn btn-sm btn-ghost gap-1 border border-base-content/10">
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 20 20"
+              fill="currentColor"
+              className="h-4 w-4"
+            >
+              <path
+                fillRule="evenodd"
+                d="M2.628 1.601C5.028 1.206 7.49 1 10 1s4.973.206 7.372.601a.75.75 0 0 1 .628.74v2.288a2.25 2.25 0 0 1-.659 1.59l-4.682 4.683a2.25 2.25 0 0 0-.659 1.59v3.037c0 .684-.31 1.33-.844 1.757l-1.937 1.55A.75.75 0 0 1 8 18.25v-5.757a2.25 2.25 0 0 0-.659-1.591L2.659 6.22A2.25 2.25 0 0 1 2 4.629V2.34a.75.75 0 0 1 .628-.74Z"
+                clipRule="evenodd"
+              />
+            </svg>
+            {filtersActive && (
+              <span className="badge badge-primary badge-xs">{filterCount}</span>
+            )}
+          </summary>
+          <div className="dropdown-content z-30 mt-2 w-64 max-h-[70vh] overflow-y-auto rounded-xl border border-base-content/10 bg-base-100 p-3 shadow-xl backdrop-blur-md">
+            <div className="space-y-3">
+              <section className="space-y-1">
+                <div className="font-mono text-[9px] uppercase tracking-widest text-base-content/40">
+                  Node type
+                </div>
+                <div className="grid grid-cols-2 gap-1">
+                  {kinds.map((kind) => (
+                    <label
+                      key={kind}
+                      className="flex cursor-pointer items-center gap-1.5 font-mono text-[11px] text-base-content"
+                    >
+                      <input
+                        type="checkbox"
+                        className="checkbox checkbox-primary checkbox-xs"
+                        checked={kindFilter.has(kind)}
+                        onChange={() => toggleKind(kind)}
+                      />
+                      <span
+                        className="h-2 w-2 rounded-sm"
+                        style={{ backgroundColor: kindColor(kind, graphTheme.kinds) }}
+                      />
+                      {kind}
+                    </label>
+                  ))}
+                </div>
+              </section>
+
+              <section className="space-y-1">
+                <div className="font-mono text-[9px] uppercase tracking-widest text-base-content/40">
+                  Directory
+                </div>
+                <select
+                  className="select select-sm select-bordered w-full font-mono text-[11px]"
+                  value={dirFilter}
+                  onChange={(e) => setDirFilter(e.target.value)}
+                >
+                  <option value="">All directories</option>
+                  {dirs.map((dir) => {
+                    const depth = dir.split("/").length - 1;
+                    const indent = dirFilter === dir ? "" : "\u00A0\u00A0".repeat(depth);
+                    return (
+                      <option key={dir} value={dir}>
+                        {dir === "(root)" ? "(root)" : `${indent}${dir}`}
+                      </option>
+                    );
+                  })}
+                </select>
+              </section>
+
+              <div className="flex items-center justify-between border-t border-base-content/10 pt-2">
+                <span className="font-mono text-[9px] uppercase tracking-widest text-base-content/50">
+                  {filtersActive
+                    ? `${matchCount} of ${totalCount} nodes`
+                    : `${totalCount} nodes`}
+                </span>
+                <button className="btn btn-xs btn-ghost" onClick={clearFilters}>
+                  Clear all
+                </button>
+              </div>
+            </div>
+          </div>
+        </details>
+      </div>
 
       <div className="absolute top-2 left-2 z-10 space-y-1 rounded-xl border border-base-content/10 bg-base-100/80 backdrop-blur-md px-2.5 py-1.5 font-mono text-[9px] uppercase tracking-widest text-base-content/70">
         <div className="text-[8px] text-primary">Edges</div>

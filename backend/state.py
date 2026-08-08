@@ -1,19 +1,17 @@
 from datetime import datetime
-from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
 from sqlalchemy.orm import Session
 
+from backend.database import SessionLocal
 from backend.models import (
+    Citation,
     Conversation,
-    FileSummary,
+    IndexedRepo,
     Message,
-    PipelineState,
-    QaRecord,
     RepoGraph,
     User,
-    UserRepo,
 )
 from vector_store.qdrant_client import QdrantManager
 
@@ -21,10 +19,29 @@ from vector_store.qdrant_client import QdrantManager
 COLLECTION_NAME = "code_chunks"
 
 
-def repo_name_from_url(repo_url: str) -> str:
-    parsed = urlparse(repo_url.strip())
-    name = Path(parsed.path).name
-    return name[:-4] if name.endswith(".git") else name or "repo"
+def normalize_repo_url(repo_url: str) -> str:
+    """Canonicalize a repo URL into a single identity form.
+
+    Handles scp-style (git@host:owner/repo.git), ssh://, and http(s);
+    strips trailing '.git' and '/'; lowercases the host. This is the single
+    place that knows about URL forms — the canonical value is threaded
+    through probing, cloning, storage, and lookups.
+    """
+    url = repo_url.strip()
+    if not url:
+        return ""
+
+    if "://" not in url and "@" in url and ":" in url:
+        host, _, path = url.partition(":")
+        url = f"https://{host.removeprefix('git@')}/{path}"
+
+    parsed = urlparse(url)
+    scheme = "https" if parsed.scheme in ("", "ssh") else parsed.scheme
+    host = parsed.hostname or ""
+    path = parsed.path.rstrip("/")
+    if path.endswith(".git"):
+        path = path[:-4]
+    return f"{scheme}://{host}{path}"
 
 
 def default_conversation_title(repo_name: str | None = None) -> str:
@@ -41,41 +58,7 @@ def collection_exists(collection_name: str = COLLECTION_NAME) -> bool:
         return False
 
 
-# ---- Pipeline state (replaces APP_STATE + marker/index files) ----
-
-
-def get_pipeline_state(db: Session) -> PipelineState:
-    state = db.get(PipelineState, 1)
-    if state is None:
-        state = PipelineState(id=1)
-        db.add(state)
-        db.commit()
-        db.refresh(state)
-    return state
-
-
-def update_pipeline_state(db: Session, **kwargs: Any) -> PipelineState:
-    state = get_pipeline_state(db)
-    for key, value in kwargs.items():
-        setattr(state, key, value)
-    db.commit()
-    db.refresh(state)
-    return state
-
-
-def pipeline_state_dict(db: Session) -> dict[str, Any]:
-    state = get_pipeline_state(db)
-    return {
-        "phase": state.phase,
-        "progress": state.progress,
-        "message": state.message,
-        "stage": state.stage,
-        "ready": state.ready,
-        "indexed_repo_name": state.indexed_repo_name,
-    }
-
-
-# ---- Users / repos ----
+# ---- Users ----
 
 
 def get_user_by_clerk_id(db: Session, clerk_id: str) -> User | None:
@@ -95,48 +78,136 @@ def upsert_user(db: Session, clerk_id: str, **fields: Any) -> User:
     return user
 
 
-def user_repo_exists(db: Session, user_id: Any, repo_name: str) -> bool:
-    return (
-        db.query(UserRepo)
-        .filter(UserRepo.user_id == user_id, UserRepo.repo_name == repo_name)
-        .first()
-        is not None
-    )
+# ---- Indexed repos ----
 
 
-def last_indexed_repo_for_user(db: Session, user_id: Any) -> str | None:
-    repo = (
-        db.query(UserRepo)
-        .filter(UserRepo.user_id == user_id)
-        .order_by(UserRepo.updated_at.desc())
-        .first()
-    )
-    return repo.repo_name if repo else None
-
-
-def record_user_repo(
+def get_or_create_indexed_repo(
     db: Session,
-    user_id: Any,
+    repo_hash: str,
     repo_name: str,
     repo_url: str,
-    files_discovered: int,
-    chunks_created: int,
+    file_count: int = 0,
+    chunks_count: int = 0,
     status: str = "indexed",
-) -> UserRepo:
-    repo = (
-        db.query(UserRepo)
-        .filter(UserRepo.user_id == user_id, UserRepo.repo_name == repo_name)
+) -> IndexedRepo:
+    repo = db.query(IndexedRepo).filter(IndexedRepo.repo_hash == repo_hash).first()
+    if repo is None:
+        repo = IndexedRepo(
+            repo_hash=repo_hash,
+            repo_name=repo_name,
+            repo_url=repo_url,
+            file_count=file_count,
+            chunks_count=chunks_count,
+            status=status,
+        )
+        db.add(repo)
+    else:
+        repo.repo_name = repo_name
+        repo.repo_url = repo_url
+        repo.file_count = file_count
+        repo.chunks_count = chunks_count
+        repo.status = status
+    db.commit()
+    db.refresh(repo)
+    return repo
+
+
+def indexed_repo_by_hash(db: Session, repo_hash: str) -> IndexedRepo | None:
+    return db.query(IndexedRepo).filter(IndexedRepo.repo_hash == repo_hash).first()
+
+
+def ensure_repo_indexing(repo_hash: str, repo_name: str, repo_url: str) -> None:
+    """Create the indexed_repo row (status='indexing') before any per-commit
+    artifacts (file_summary, repo_graph) reference it. Finalized by the caller
+    with get_or_create_indexed_repo(..., status='indexed') after the pipeline."""
+    db = SessionLocal()
+    try:
+        if db.query(IndexedRepo).filter(IndexedRepo.repo_hash == repo_hash).first() is None:
+            db.add(
+                IndexedRepo(
+                    repo_hash=repo_hash,
+                    repo_name=repo_name,
+                    repo_url=repo_url,
+                    status="indexing",
+                )
+            )
+            db.commit()
+    finally:
+        db.close()
+
+
+def mark_repo_failed(repo_hash: str) -> None:
+    """Flip a mid-ingest indexed_repo row to 'failed' when the pipeline errors."""
+    db = SessionLocal()
+    try:
+        repo = db.query(IndexedRepo).filter(IndexedRepo.repo_hash == repo_hash).first()
+        if repo is not None and repo.status == "indexing":
+            repo.status = "failed"
+            db.commit()
+    finally:
+        db.close()
+
+
+def latest_indexed_repo_by_url(db: Session, repo_url: str) -> IndexedRepo | None:
+    return (
+        db.query(IndexedRepo)
+        .filter(
+            IndexedRepo.repo_url == repo_url,
+            IndexedRepo.status != "deleted",
+        )
+        .order_by(IndexedRepo.created_at.desc())
         .first()
     )
-    if repo is None:
-        repo = UserRepo(user_id=user_id, repo_name=repo_name, repo_url=repo_url)
-        db.add(repo)
-    repo.repo_url = repo_url
-    repo.files_discovered = files_discovered
-    repo.chunks_created = chunks_created
-    repo.status = status
-    db.commit()
-    return repo
+
+
+# ---- User repo derivation (a user's repos = distinct repos from their conversations) ----
+
+
+def user_repo_urls(db: Session, clerk_id: str) -> list[str]:
+    rows = (
+        db.query(IndexedRepo.repo_url)
+        .join(Conversation, Conversation.repo_hash == IndexedRepo.repo_hash)
+        .filter(Conversation.clerk_id == clerk_id, IndexedRepo.status != "deleted")
+        .distinct()
+        .all()
+    )
+    return [r[0] for r in rows]
+
+
+def user_repo_exists(db: Session, clerk_id: str, repo_url: str) -> bool:
+    return repo_url in user_repo_urls(db, clerk_id)
+
+
+def last_indexed_repo_for_user(db: Session, clerk_id: str) -> str | None:
+    conv = (
+        db.query(Conversation)
+        .filter(Conversation.clerk_id == clerk_id, Conversation.repo_hash.isnot(None))
+        .order_by(Conversation.updated_at.desc())
+        .first()
+    )
+    if conv is None or conv.indexed_repo is None:
+        return None
+    return conv.indexed_repo.repo_name
+
+
+def list_user_repos(db: Session, clerk_id: str) -> list[IndexedRepo]:
+    """One row per repo (the commit the user is most recently active on), most recent first.
+
+    Collapses multiple indexed commits of the same repo_url into a single entry
+    so the repos list shows one repo, not one row per commit.
+    """
+    rows = (
+        db.query(IndexedRepo)
+        .join(Conversation, Conversation.repo_hash == IndexedRepo.repo_hash)
+        .filter(Conversation.clerk_id == clerk_id, IndexedRepo.status != "deleted")
+        .order_by(Conversation.updated_at.desc())
+        .all()
+    )
+    seen: dict[str, IndexedRepo] = {}
+    for repo in rows:
+        if repo.repo_url not in seen:
+            seen[repo.repo_url] = repo
+    return list(seen.values())
 
 
 # ---- Conversations ----
@@ -144,42 +215,42 @@ def record_user_repo(
 
 def resolve_conversation_repo(
     db: Session,
-    user_id: Any,
+    clerk_id: str,
     conversation_id: Any,
-    requested_repo: str | None,
-) -> str | None:
-    """Resolve the repo a chat should search over.
+    requested_repo_hash: str | None = None,
+) -> tuple[str | None, str | None]:
+    """Resolve (repo_hash, repo_name) a chat should search over.
 
-    Precedence: the conversation's stored repo (if continuing one) > the
-    repo the client requested > the last globally indexed repo.
+    Precedence: the conversation's stored repo > the repo the client requested
+    (by its commit hash) > None.
     """
-    repo_name = requested_repo
     if conversation_id is not None:
         conv = db.get(Conversation, conversation_id)
-        if conv is not None and conv.user_id == user_id and conv.repo_name:
-            repo_name = conv.repo_name
-    if not repo_name:
-        repo_name = pipeline_state_dict(db).get("indexed_repo_name")
-    return repo_name
+        if conv is not None and conv.clerk_id == clerk_id and conv.indexed_repo is not None:
+            return conv.repo_hash, conv.indexed_repo.repo_name
+    if requested_repo_hash:
+        repo = indexed_repo_by_hash(db, requested_repo_hash)
+        if repo is not None and repo.status != "deleted":
+            return repo.repo_hash, repo.repo_name
+    return None, None
 
 
 def get_or_create_conversation(
     db: Session,
-    user_id: Any,
+    clerk_id: str,
     conversation_id: Any = None,
     title: str | None = None,
+    repo_hash: str | None = None,
     repo_name: str | None = None,
-    repo_url: str | None = None,
 ) -> Conversation:
     if conversation_id is not None:
         conv = db.get(Conversation, conversation_id)
-        if conv is not None and conv.user_id == user_id:
+        if conv is not None and conv.clerk_id == clerk_id:
             return conv
     conv = Conversation(
-        user_id=user_id,
+        clerk_id=clerk_id,
         title=title or default_conversation_title(repo_name),
-        repo_name=repo_name,
-        repo_url=repo_url,
+        repo_hash=repo_hash,
     )
     db.add(conv)
     db.commit()
@@ -192,13 +263,15 @@ def add_message(
     conversation_id: Any,
     role: str,
     content: str,
-    citations: list[dict] | None = None,
+    citation: list[dict] | None = None,
+    repo_hash: str | None = None,
 ) -> Message:
     msg = Message(
         conversation_id=conversation_id,
         role=role,
         content=content,
-        citations=citations or [],
+        citation=citation or [],
+        repo_hash=repo_hash,
     )
     db.add(msg)
     db.commit()
@@ -206,29 +279,55 @@ def add_message(
     return msg
 
 
-# ---- Summaries / QA ----
+def write_citations(db: Session, message_id: Any, citations: list[dict]) -> int:
+    """Persist durable citation rows (for cleanup + retention). Skips entries without a repo_hash."""
+    rows = [
+        Citation(
+            message_id=message_id,
+            citation_id=c["citation_id"],
+            repo_hash=c.get("repo_hash"),
+            chunk_id=c["chunk_id"],
+            file_path=c["file_path"],
+            start_line=c["start_line"],
+            end_line=c["end_line"],
+            symbol=c.get("symbol"),
+            language=c.get("language"),
+        )
+        for c in citations
+        if c.get("repo_hash")
+    ]
+    if rows:
+        db.add_all(rows)
+        db.commit()
+    return len(rows)
 
 
-def save_qa_record(db: Session, repo_name: str, query: str, answer: str, citations: list[dict]) -> None:
-    db.add(QaRecord(repo_name=repo_name, query=query, answer=answer, citations=citations))
-    db.commit()
+def cited_chunk_ids(db: Session, repo_hash: str) -> list[str]:
+    """Chunk ids that still have durable citations for a commit (retained during cleanup)."""
+    rows = (
+        db.query(Citation.chunk_id)
+        .filter(Citation.repo_hash == repo_hash)
+        .distinct()
+        .all()
+    )
+    return [r[0] for r in rows]
 
 
 # ---- Repo graphs ----
 
 
-def save_repo_graph(db: Session, repo_name: str, graph: dict) -> None:
-    row = db.get(RepoGraph, repo_name)
+def save_repo_graph(db: Session, repo_hash: str, graph: dict) -> None:
+    row = db.query(RepoGraph).filter(RepoGraph.repo_hash == repo_hash).first()
     if row is None:
-        row = RepoGraph(repo_name=repo_name, graph_json=graph)
+        row = RepoGraph(repo_hash=repo_hash, graph_json=graph)
         db.add(row)
     else:
         row.graph_json = graph
     db.commit()
 
 
-def load_repo_graph(db: Session, repo_name: str) -> dict | None:
-    row = db.get(RepoGraph, repo_name)
+def load_repo_graph(db: Session, repo_hash: str) -> dict | None:
+    row = db.query(RepoGraph).filter(RepoGraph.repo_hash == repo_hash).first()
     return row.graph_json if row is not None else None
 
 
@@ -245,9 +344,9 @@ def reset_index_state(db: Session, wipe: bool = True) -> None:
         except Exception:
             pass
 
-    db.query(QaRecord).delete()
-    db.query(FileSummary).delete()
-    db.query(UserRepo).delete()
+    # Detach conversations from repos (keep chat history), then wipe repo-scoped data.
+    db.query(Conversation).update({Conversation.repo_hash: None})
+    db.query(Citation).delete()
     db.query(RepoGraph).delete()
-    db.query(PipelineState).delete()
+    db.query(IndexedRepo).delete()
     db.commit()

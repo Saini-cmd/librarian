@@ -33,13 +33,13 @@ class HybridRetriever:
         self,
         query: str,
         query_vector: list[float],
-        repo_name: str | None = None,
+        repo_hash: str | None = None,
     ) -> HybridRetrievalResult:
         vector_results = self.vector_retriever.search(
-            query_vector, top_k=self.vector_top_k, repo_name=repo_name
+            query_vector, top_k=self.vector_top_k, repo_hash=repo_hash
         )
         bm25_results = self.bm25_index.search(
-            query, top_k=self.bm25_top_k, repo_name=repo_name
+            query, top_k=self.bm25_top_k, repo_hash=repo_hash
         )
 
         vector_ids = [result["chunk_id"] for result in vector_results]

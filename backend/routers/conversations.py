@@ -8,7 +8,12 @@ from sqlalchemy.orm import Session
 from backend.auth import get_current_user
 from backend.database import get_db
 from backend.models import Conversation, Message
-from backend.state import default_conversation_title, upsert_user
+from backend.state import (
+    default_conversation_title,
+    latest_indexed_repo_by_url,
+    normalize_repo_url,
+    upsert_user,
+)
 
 
 router = APIRouter(prefix="/api/conversations", tags=["conversations"])
@@ -25,6 +30,7 @@ class MessageOut(BaseModel):
     role: str
     content: str
     citations: list[dict] = []
+    repo_hash: str | None = None
     created_at: datetime
 
 
@@ -33,6 +39,7 @@ class ConversationOut(BaseModel):
     title: str
     repo_name: str | None = None
     repo_url: str | None = None
+    repo_hash: str | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -42,19 +49,21 @@ class ConversationDetail(ConversationOut):
 
 
 def _to_out(conv: Conversation) -> ConversationOut:
+    repo = conv.indexed_repo
     return ConversationOut(
         id=str(conv.id),
         title=conv.title,
-        repo_name=conv.repo_name,
-        repo_url=conv.repo_url,
+        repo_name=repo.repo_name if repo else None,
+        repo_url=repo.repo_url if repo else None,
+        repo_hash=repo.repo_hash if repo else None,
         created_at=conv.created_at,
         updated_at=conv.updated_at,
     )
 
 
-def _require_owned(db: Session, user_id: uuid.UUID, conversation_id: uuid.UUID) -> Conversation:
+def _require_owned(db: Session, clerk_id: str, conversation_id: uuid.UUID) -> Conversation:
     conv = db.get(Conversation, conversation_id)
-    if conv is None or conv.user_id != user_id:
+    if conv is None or conv.clerk_id != clerk_id:
         raise HTTPException(status_code=404, detail="Conversation not found")
     return conv
 
@@ -67,7 +76,7 @@ def list_conversations(
     user = upsert_user(db, clerk_id)
     convs = (
         db.query(Conversation)
-        .filter(Conversation.user_id == user.id)
+        .filter(Conversation.clerk_id == user.clerk_id)
         .order_by(Conversation.updated_at.desc())
         .all()
     )
@@ -81,11 +90,14 @@ def create_conversation(
     db: Session = Depends(get_db),
 ) -> ConversationOut:
     user = upsert_user(db, clerk_id)
+    repo_hash = None
+    if payload.repo_url:
+        repo = latest_indexed_repo_by_url(db, normalize_repo_url(payload.repo_url))
+        repo_hash = repo.repo_hash if repo else None
     conv = Conversation(
-        user_id=user.id,
+        clerk_id=user.clerk_id,
         title=payload.title or default_conversation_title(payload.repo_name),
-        repo_name=payload.repo_name,
-        repo_url=payload.repo_url,
+        repo_hash=repo_hash,
     )
     db.add(conv)
     db.commit()
@@ -100,7 +112,7 @@ def get_conversation(
     db: Session = Depends(get_db),
 ) -> ConversationDetail:
     user = upsert_user(db, clerk_id)
-    conv = _require_owned(db, user.id, conversation_id)
+    conv = _require_owned(db, user.clerk_id, conversation_id)
     return ConversationDetail(
         **_to_out(conv).model_dump(),
         messages=[
@@ -108,7 +120,8 @@ def get_conversation(
                 id=str(m.id),
                 role=m.role,
                 content=m.content,
-                citations=m.citations or [],
+                citations=m.citation or [],
+                repo_hash=m.repo_hash,
                 created_at=m.created_at,
             )
             for m in conv.messages
@@ -123,6 +136,6 @@ def delete_conversation(
     db: Session = Depends(get_db),
 ) -> None:
     user = upsert_user(db, clerk_id)
-    conv = _require_owned(db, user.id, conversation_id)
+    conv = _require_owned(db, user.clerk_id, conversation_id)
     db.delete(conv)
     db.commit()

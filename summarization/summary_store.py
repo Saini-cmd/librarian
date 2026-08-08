@@ -5,12 +5,12 @@ from backend.models import FileSummary
 class SummaryStore:
 
     @staticmethod
-    def exists(repo_name: str) -> bool:
+    def exists(repo_hash: str) -> bool:
         db = SessionLocal()
         try:
             return (
                 db.query(FileSummary)
-                .filter(FileSummary.repo_name == repo_name)
+                .filter(FileSummary.repo_hash == repo_hash)
                 .first()
                 is not None
             )
@@ -18,14 +18,14 @@ class SummaryStore:
             db.close()
 
     @staticmethod
-    def save(repo_name: str, summaries: dict[str, str]) -> None:
+    def save(repo_hash: str, summaries: dict[str, str]) -> None:
         db = SessionLocal()
         try:
-            db.query(FileSummary).filter(FileSummary.repo_name == repo_name).delete()
+            db.query(FileSummary).filter(FileSummary.repo_hash == repo_hash).delete()
             for file_path, summary_text in summaries.items():
                 db.add(
                     FileSummary(
-                        repo_name=repo_name,
+                        repo_hash=repo_hash,
                         file_path=file_path,
                         summary_text=summary_text,
                     )
@@ -35,12 +35,12 @@ class SummaryStore:
             db.close()
 
     @staticmethod
-    def load(repo_name: str) -> dict[str, str]:
+    def load(repo_hash: str) -> dict[str, str]:
         db = SessionLocal()
         try:
             rows = (
                 db.query(FileSummary)
-                .filter(FileSummary.repo_name == repo_name)
+                .filter(FileSummary.repo_hash == repo_hash)
                 .all()
             )
             return {row.file_path: row.summary_text for row in rows}
@@ -48,13 +48,13 @@ class SummaryStore:
             db.close()
 
     @staticmethod
-    def get(repo_name: str, file_path: str) -> str | None:
+    def get(repo_hash: str, file_path: str) -> str | None:
         db = SessionLocal()
         try:
             row = (
                 db.query(FileSummary)
                 .filter(
-                    FileSummary.repo_name == repo_name,
+                    FileSummary.repo_hash == repo_hash,
                     FileSummary.file_path == file_path,
                 )
                 .first()

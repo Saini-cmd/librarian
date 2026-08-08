@@ -15,12 +15,12 @@ export default function CitationCard({ citation, anchorRect, onClose }) {
     let cancelled = false;
     setChunk(null);
     setError("");
-    const repo = citation.repo || citation.repo_name;
-    if (!repo || !citation.chunk_id) {
+    const repoHash = citation.repo_hash;
+    if (!repoHash || !citation.chunk_id) {
       setError("Missing chunk reference");
       return undefined;
     }
-    getChunk(repo, citation.chunk_id)
+    getChunk(repoHash, citation.chunk_id)
       .then((data) => {
         if (!cancelled) setChunk(data);
       })
@@ -30,7 +30,7 @@ export default function CitationCard({ citation, anchorRect, onClose }) {
     return () => {
       cancelled = true;
     };
-  }, [citation.chunk_id, citation.repo, citation.repo_name]);
+  }, [citation.chunk_id, citation.repo_hash]);
 
   const place = useCallback(() => {
     const el = cardRef.current;
