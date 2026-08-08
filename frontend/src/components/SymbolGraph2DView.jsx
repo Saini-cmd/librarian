@@ -14,23 +14,8 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import ELK from "elkjs/lib/elk.bundled.js";
+import { useGraphTheme } from "../theme";
 
-const KIND_COLORS = {
-  file: "#4a7c9b",
-  class: "#8b6fb0",
-  interface: "#7dd3fc",
-  impl: "#c9a06c",
-  method: "#b07a8a",
-  function: "#5a9e6f",
-  entity: "#788291",
-};
-
-const EDGE_COLORS = {
-  defines: "#fb923c",
-  imports: "#facc15",
-  used_in: "#2dd4bf",
-  uses: "#22c55e",
-};
 const EDGE_WIDTH = 1;
 const EDGE_OPACITY = 0.55;
 const EDGE_OPACITY_DIM = 0.12;
@@ -41,11 +26,14 @@ const NODE_HEIGHT = 52;
 
 // Mirrors Understand-Anything's structural layout: layered ELK ranks +
 // orthogonal edge routing minimize crossings and tangles for code graphs.
+// aspectRatio ~1.0 (width ~ height) plus tighter rows / taller layer gaps
+// keeps the graph from expanding too wide relative to its height.
 const ELK_OPTIONS = {
   algorithm: "layered",
   "elk.direction": "DOWN",
-  "elk.layered.spacing.nodeNodeBetweenLayers": "90",
-  "elk.spacing.nodeNode": "70",
+  "elk.aspectRatio": "1.0",
+  "elk.layered.spacing.nodeNodeBetweenLayers": "150",
+  "elk.spacing.nodeNode": "44",
   "elk.layered.crossingMinimization.strategy": "LAYER_SWEEP",
   "elk.edgeRouting": "ORTHOGONAL",
   "elk.layered.compaction.postCompaction.strategy": "LEFT",
@@ -98,8 +86,8 @@ function applyPositions(flowNodes, flowEdges, positions, selectedId) {
   });
 }
 
-function kindColor(kind) {
-  return KIND_COLORS[kind] || KIND_COLORS.entity;
+function kindColor(kind, kinds) {
+  return kinds[kind] || kinds.entity;
 }
 
 function nodeFlags(id, selectedId, edges) {
@@ -113,10 +101,10 @@ function nodeFlags(id, selectedId, edges) {
   return { selected: false, neighbor, faded: !neighbor };
 }
 
-function edgeStyles(ed, selectedId) {
+function edgeStyles(ed, selectedId, colors) {
   const highlight = !!selectedId && (ed.source === selectedId || ed.target === selectedId);
-  const typeColor = EDGE_COLORS[ed.edgeType] || "#71717a";
-  const stroke = selectedId ? (highlight ? typeColor : "#4b4b4f") : typeColor;
+  const typeColor = colors.edges[ed.edgeType] || colors.fallback;
+  const stroke = selectedId ? (highlight ? typeColor : colors.neutral) : typeColor;
   return {
     ...ed,
     markerEnd: { ...ed.markerEnd, color: stroke },
@@ -133,9 +121,9 @@ const NodeCard = memo(function NodeCard({ data }) {
   const { label, kind, color, selected, neighbor, faded } = data;
   return (
     <div
-      className={`relative rounded-lg border border-base-300 bg-base-200 px-2.5 py-1.5 shadow-md transition-[opacity,box-shadow,outline] duration-200 ${
+      className={`relative rounded-xl border border-base-content/10 bg-base-100 px-2.5 py-1.5 shadow-sm transition-[opacity,box-shadow,outline] duration-200 ${
         selected
-          ? "outline outline-2 outline-primary shadow-[0_0_14px_rgba(0,255,65,0.35)]"
+          ? "outline outline-2 outline-primary glow"
             : faded
               ? "opacity-20"
               : neighbor
@@ -147,7 +135,7 @@ const NodeCard = memo(function NodeCard({ data }) {
       <Handle type="target" position={Position.Left} style={{ opacity: 0 }} />
       <Handle type="source" position={Position.Right} style={{ opacity: 0 }} />
       <div
-        className="absolute left-0 top-0 h-full w-1 rounded-l-lg"
+        className="absolute left-0 top-0 h-full w-1 rounded-l-xl"
         style={{ backgroundColor: color }}
       />
       <div className="pl-1.5 font-mono text-[11px] leading-tight text-base-content truncate" title={label}>
@@ -175,6 +163,7 @@ export default function SymbolGraph2DView({ graph, selectedId, onSelect }) {
 
 function GraphFlow({ graph, selectedId, onSelect }) {
   const rf = useReactFlow();
+  const graphTheme = useGraphTheme();
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const [layouting, setLayouting] = useState(false);
@@ -192,14 +181,14 @@ function GraphFlow({ graph, selectedId, onSelect }) {
         ...n,
         label: n.label,
         kind: n.kind,
-        color: kindColor(n.kind),
+        color: kindColor(n.kind, graphTheme.kinds),
         selected: false,
         neighbor: false,
         faded: false,
       },
     }));
     const flowEdges = gEdges.map((e, i) => {
-      const stroke = EDGE_COLORS[e.type] || "#71717a";
+      const stroke = graphTheme.edges[e.type] || graphTheme.fallback;
       return {
         id: `e${i}`,
         source: e.source,
@@ -220,7 +209,7 @@ function GraphFlow({ graph, selectedId, onSelect }) {
       };
     });
     return { flowNodes, flowEdges };
-  }, [graph]);
+  }, [graph, graphTheme]);
 
   useEffect(() => {
     if (!base.flowNodes.length) {
@@ -230,13 +219,13 @@ function GraphFlow({ graph, selectedId, onSelect }) {
     }
 
     const repo = graph?.repo || "";
-    const cacheKey = repo ? `ua-layout:${repo}:${graphFingerprint(base.flowNodes, base.flowEdges)}` : "";
+    const cacheKey = repo ? `ua-layout:v2:${repo}:${graphFingerprint(base.flowNodes, base.flowEdges)}` : "";
     const cacheable = cacheKey && base.flowNodes.length <= LAYOUT_CACHE_MAX_NODES;
 
     const cached = cacheable ? readCachedLayout(cacheKey) : null;
     if (cached) {
       setNodes(applyPositions(base.flowNodes, base.flowEdges, cached, selectedIdRef.current));
-      setEdges(base.flowEdges.map((ed) => edgeStyles(ed, selectedIdRef.current)));
+      setEdges(base.flowEdges.map((ed) => edgeStyles(ed, selectedIdRef.current, graphTheme)));
       return undefined;
     }
 
@@ -280,7 +269,7 @@ function GraphFlow({ graph, selectedId, onSelect }) {
           );
         }
         setNodes(placed);
-        setEdges(base.flowEdges.map((ed) => edgeStyles(ed, selectedIdRef.current)));
+        setEdges(base.flowEdges.map((ed) => edgeStyles(ed, selectedIdRef.current, graphTheme)));
         setLayouting(false);
       })
       .catch(() => {
@@ -291,7 +280,7 @@ function GraphFlow({ graph, selectedId, onSelect }) {
     return () => {
       cancelled = true;
     };
-  }, [base, graph, setEdges, setNodes]);
+  }, [base, graph, graphTheme, setEdges, setNodes]);
 
   useEffect(() => {
     setNodes((nds) =>
@@ -300,8 +289,8 @@ function GraphFlow({ graph, selectedId, onSelect }) {
         data: { ...n.data, ...nodeFlags(n.id, selectedId, base.flowEdges) },
       }))
     );
-    setEdges((eds) => eds.map((ed) => edgeStyles(ed, selectedId)));
-  }, [selectedId, base, setNodes, setEdges]);
+    setEdges((eds) => eds.map((ed) => edgeStyles(ed, selectedId, graphTheme)));
+  }, [selectedId, base, graphTheme, setNodes, setEdges]);
 
   useEffect(() => {
     if (nodes.length) {
@@ -310,22 +299,22 @@ function GraphFlow({ graph, selectedId, onSelect }) {
   }, [nodes.length, rf]);
 
   return (
-    <div className="absolute inset-0 bg-[#0c0c0c]">
+    <div className="absolute inset-0 graph-surface">
       <ReactFlow
         nodes={nodes}
         edges={edges}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         nodeTypes={nodeTypes}
-        colorMode="dark"
+        colorMode={graphTheme.colorMode}
         minZoom={0.05}
         proOptions={{ hideAttribution: true }}
         onNodeClick={(_, node) => node.data && onSelect(node.data)}
         onPaneClick={() => onSelect(null)}
       >
-        <Background color="#262626" gap={28} size={1} />
+        <Background color={graphTheme.grid} gap={28} size={1} />
         <Controls showInteractive={false} />
-        <MiniMap nodeColor={(n) => n.data?.color || "#3f3f46"} pannable zoomable />
+        <MiniMap nodeColor={(n) => n.data?.color || graphTheme.minimap} pannable zoomable />
       </ReactFlow>
 
       {layouting && (
@@ -334,10 +323,10 @@ function GraphFlow({ graph, selectedId, onSelect }) {
         </div>
       )}
 
-      <div className="absolute top-2 left-2 z-10 space-y-1 rounded border-2 border-base-300 bg-base-200/90 px-2.5 py-1.5 font-mono text-[9px] uppercase tracking-widest text-base-content/70">
+      <div className="absolute top-2 left-2 z-10 space-y-1 rounded-xl border border-base-content/10 bg-base-100/80 backdrop-blur-md px-2.5 py-1.5 font-mono text-[9px] uppercase tracking-widest text-base-content/70">
         <div className="text-[8px] text-primary">Edges</div>
         <div className="flex flex-wrap gap-x-3 gap-y-1">
-          {Object.entries(EDGE_COLORS).map(([type, color]) => (
+          {Object.entries(graphTheme.edges).map(([type, color]) => (
             <span key={type} className="inline-flex items-center gap-1">
               <span className="h-2 w-2 rounded-sm" style={{ backgroundColor: color }} />
               {type}
@@ -346,7 +335,7 @@ function GraphFlow({ graph, selectedId, onSelect }) {
         </div>
         <div className="pt-1 text-[8px] text-base-content/40">Nodes</div>
         <div className="flex flex-wrap gap-x-3 gap-y-1">
-          {Object.entries(KIND_COLORS).map(([kind, color]) => (
+          {Object.entries(graphTheme.kinds).map(([kind, color]) => (
             <span key={kind} className="inline-flex items-center gap-1">
               <span className="h-2 w-2 rounded-sm" style={{ backgroundColor: color }} />
               {kind}

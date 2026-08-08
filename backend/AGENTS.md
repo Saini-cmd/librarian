@@ -11,14 +11,15 @@ FastAPI server providing REST API for repo ingestion, chat, users, conversations
 - `models.py` — ORM models: `User`, `Conversation`, `Message`, `UserRepo`, `PipelineState`, `FileSummary`, `QaRecord`, `RepoGraph`
 - `routers/users.py` — `GET/PATCH /api/users/me` with lazy Clerk user upsert
 - `routers/conversations.py` — Conversation CRUD + nested messages
-- `routers/repositories.py` — `GET /api/repositories` (user's indexed repos), `GET /api/repositories/{repo}/graph` (symbol graph from persisted `repo_graphs`, lazy-build + persist fallback for pre-existing repos), `GET /api/repositories/{repo}/summary` (stored file summary via `SummaryStore`)
+- `routers/repositories.py` — `GET /api/repositories` (user's indexed repos), `GET /api/repositories/{repo}/graph` (symbol graph from persisted `repo_graphs`, lazy-build + persist fallback for pre-existing repos), `GET /api/repositories/{repo}/summary` (stored file summary via `SummaryStore`), `GET /api/repositories/{repo}/chunks/{chunk_id}` (single chunk payload from Qdrant — powers clickable citations)
 
 ## Local Contracts
 - All API paths prefixed with `/api` (proxied by Vite dev server)
 - Clerk JWT required on protected routes (`Depends(get_current_user)`); 401 on invalid/missing
 - DB: sync SQLAlchemy + psycopg2; tables auto-created at startup via `create_all` (Alembic deferred)
 - Pipeline state persisted in single-row `pipeline_state` table (replaces old in-memory `APP_STATE` + marker/index files)
-- Chat persists `Message` rows; conversation auto-created when `conversation_id` is null (title = `repo_name · timestamp` of first message via `default_conversation_title`, so the same repo in separate chats gets distinct names)
+- Chat persists `Message` rows; a `Conversation` is created at the end of successful ingestion (`/api/process` returns its `conversation_id`, title = `repo_name · ingestion-end timestamp` via `default_conversation_title`), so the repo appears in the sidebar immediately and all its chat messages join that same conversation. Chat reuses the conversation when `conversation_id` is provided, or auto-creates one when null (fallback). Re-ingesting an already-indexed repo also creates a fresh conversation (one entry per chat session)
+- Assistant `Message` rows carry a `citations` JSON map (citation_id → chunk_id/file_path/lines/symbol/language/repo) resolved after generation; citations are mapped **only from `[C1]` markers the LLM actually emits** — an answer with no markers gets no sources appended (no `Sources:` fallback)
 - QA answers stored as `QaRecord` rows (replaces `data/responses/latest.md`)
 - `reset` wipes Qdrant collection + `user_repos`, `file_summaries`, `qa_records`, `repo_graphs`, `pipeline_state`; preserves users and conversation history
 - `collection_exists` fails safe (returns `False`) when Qdrant is unreachable
@@ -26,11 +27,12 @@ FastAPI server providing REST API for repo ingestion, chat, users, conversations
   - `GET /api/health` — health check (no auth)
   - `GET /api/status` — pipeline state + Qdrant collection status (auth optional; when authenticated, `indexed_repo_name`/`ready` are derived from the caller's own repos via `last_indexed_repo_for_user`, preventing cross-user repo leakage)
   - `POST /api/reset` — wipe Qdrant + index data (no auth — should be protected)
-  - `POST /api/process` — ingest repo (auth required)
+  - `POST /api/process` — ingest repo; creates a `Conversation` on success and returns its `conversation_id` (auth required)
   - `POST /api/chat` — query → retrieve → generate, persists messages (auth required)
   - `POST /api/chat/stream` — SSE streaming chat, persists messages (auth required)
   - `GET /api/repositories/{repo}/graph` — symbol graph for a repo, served from the persisted `repo_graphs` table (auth, repo ownership checked); if no row exists (pre-persistence repo) it lazy-builds via `build_repo_graph` and persists it
   - `GET /api/repositories/{repo}/summary?file_path=` — stored per-file summary via `SummaryStore` (auth, repo ownership checked)
+  - `GET /api/repositories/{repo}/chunks/{chunk_id}` — full chunk payload (incl. `content`) fetched from Qdrant by point id (auth, repo ownership checked); 404 on missing/unowned chunk
 - Chat is repo-aware: `/api/chat` and `/api/chat/stream` accept optional `repo_name`; the effective repo is resolved via `resolve_conversation_repo` (conversation's stored repo > requested > last globally indexed) and scopes retrieval to that repo's chunks
 - Symbol graphs are built once at ingest time by `orchestration/` (`build_repo_graph_from_chunks`) and persisted to the `repo_graphs` table via `save_repo_graph`; `GET /graph` reads the DB (no in-process cache — durable across restarts/workers). Re-ingesting an already-indexed repo is short-circuited (`user_repo_exists` in `/api/process`) so the graph is NOT rebuilt then; the only rebuild path is the lazy `GET /graph` fallback when no `repo_graphs` row exists. `/api/reset` deletes all graph rows via `delete_all_repo_graphs`
 - **Design principle: minimize re-ingestion** — re-ingesting is cost-heavy (clone + chunk + summarize + embed via OpenRouter), so the system short-circuits known repos on both frontend and backend, and prefers lazy rebuilds (graph, summaries) over pipeline re-runs
@@ -38,7 +40,7 @@ FastAPI server providing REST API for repo ingestion, chat, users, conversations
 ## Work Guidance
 - Adding a new router: create file in `routers/`, mount in `main.py`
 - Auth is per-route via `Depends(get_current_user)` — not middleware-based
-- New ORM models: add to `models.py`; tables auto-create on next startup
+- New ORM models: add to `models.py`; tables auto-create on next startup (new columns on existing tables need a manual `ALTER TABLE` — no migration tooling)
 - `chat/stream` manages its own `SessionLocal` session (outlives the request via the SSE generator)
 - Clerk webhook receiver (`POST /api/webhooks/clerk`) not yet implemented — users are lazily upserted on first authenticated request
 

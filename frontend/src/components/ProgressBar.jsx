@@ -17,12 +17,12 @@ export default function ProgressBar({ progress, statusText }) {
 
   return (
     <div className="w-full max-w-2xl mx-auto space-y-6">
-      <p className="font-mono text-xs uppercase tracking-widest text-base-content/60 text-center">
+      <p className="text-sm text-base-content/60 text-center">
         {statusText}
       </p>
 
       <progress
-        className="progress w-full"
+        className="progress progress-primary w-full"
         value={progress}
         max="100"
       />
@@ -31,16 +31,14 @@ export default function ProgressBar({ progress, statusText }) {
         {stages.map((stage, idx) => (
           <li
             key={stage.key}
-            className={`step text-xs uppercase tracking-wider ${
-              idx <= currentStageIdx ? "step-primary" : ""
-            }`}
+            className={`step text-sm ${idx <= currentStageIdx ? "step-primary" : ""}`}
           >
             {stage.label}
           </li>
         ))}
       </ul>
 
-      <p className="font-mono text-xs text-base-content/40 text-center">
+      <p className="text-xs text-base-content/40 text-center">
         {Math.round(progress)}% complete
       </p>
     </div>

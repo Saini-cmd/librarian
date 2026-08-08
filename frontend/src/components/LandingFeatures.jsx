@@ -1,28 +1,44 @@
 import { useRef, useLayoutEffect } from "react";
 import gsap from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
+import ClayShapes from "./ClayShapes";
 
 const features = [
   {
     title: "Semantic Code Search",
-    desc: "Ask natural language questions about your codebase. Librarian AI understands context, not just keywords.",
+    desc: "Ask natural language questions about your codebase. Librarian AI understands context, not just keywords — so you get answers about intent, not string matches.",
     metric: "HYBRID",
+    chip: "bg-primary/15 text-primary",
+    span: "md:col-span-2",
   },
   {
     title: "Multi-Language Support",
-    desc: "Python, JavaScript, TypeScript, Rust, Go, Java, Kotlin, C, C++, C#, Ruby — AST-aware chunking for all.",
+    desc: "AST-aware chunking for a dozen+ languages.",
     metric: "12 LANG",
+    chip: "bg-accent/15 text-accent",
+    span: "md:col-span-1",
   },
   {
     title: "Streaming Responses",
-    desc: "Real-time token-by-token answers with source citations. See the reasoning as it happens.",
+    desc: "Token-by-token answers with source citations.",
     metric: "REALTIME",
+    chip: "bg-success/15 text-success",
+    span: "md:col-span-1",
   },
   {
     title: "Battle-Tested Pipeline",
-    desc: "Clone, chunk, summarize, embed, and query in one seamless flow. Built for production.",
+    desc: "Clone, chunk, summarize, embed, and query in one seamless flow. Built for production from day one — every stage is observable and recoverable.",
     metric: "5 STAGE",
+    chip: "bg-warning/15 text-warning",
+    span: "md:col-span-2",
   },
+];
+
+const SECTION_SHAPES = [
+  { type: "circle", size: 36, x: 4, y: 12, color: "text-primary/20", float: 12, duration: 6 },
+  { type: "squircle", size: 44, x: 94, y: 20, color: "text-accent/20", spin: 360, float: 10, duration: 9 },
+  { type: "ring", size: 40, x: 96, y: 80, color: "text-success/20", spin: -360, duration: 8 },
+  { type: "egg", size: 34, x: 2, y: 82, color: "text-warning/25", float: 12, duration: 7 },
 ];
 
 export default function LandingFeatures() {
@@ -44,7 +60,7 @@ export default function LandingFeatures() {
 
       ScrollTrigger.create({
         trigger: section.current,
-        start: "top 50%",
+        start: "top 55%",
         toggleActions: "play none none none",
         onEnter: () => {
           const tl = gsap.timeline();
@@ -64,41 +80,39 @@ export default function LandingFeatures() {
   }, []);
 
   return (
-    <section ref={section} className="border-b-2 border-base-300">
-      <div className="max-w-6xl mx-auto px-6 py-20">
-        <div className="text-center mb-16 space-y-4">
-          <p className="features-badge font-mono text-xs uppercase tracking-[0.2em] text-primary">
-            [ CAPABILITIES ]
-          </p>
-          <h2 className="features-heading text-3xl lg:text-5xl font-black tracking-tight uppercase">
+    <section ref={section} className="relative bg-base-100">
+      <ClayShapes shapes={SECTION_SHAPES} />
+
+      <div className="max-w-6xl mx-auto px-6 py-24 relative">
+        <div className="text-center mb-14 space-y-4">
+          <span className="features-badge inline-block rounded-full bg-white px-5 py-2 text-sm font-semibold text-primary clay">
+            Capabilities
+          </span>
+          <h2 className="features-heading text-4xl lg:text-5xl font-extrabold tracking-tight text-base-content">
             What it does
           </h2>
         </div>
 
-        <div
-          ref={gridRef}
-          className="grid grid-cols-1 md:grid-cols-2 gap-0 border-2 border-base-300"
-        >
+        <div ref={gridRef} className="grid grid-cols-1 md:grid-cols-3 gap-8">
           {features.map((f, i) => (
             <div
               key={i}
-              className={`feature-card p-8 lg:p-10 border-b-2 border-base-300 ${
-                i % 2 === 0 && i < features.length - 1 ? "md:border-r-2" : ""
-              } ${i >= features.length - 2 ? "md:border-b-0" : ""} ${
-                i === features.length - 1 ? "border-b-0" : ""
-              }`}
+              className={`feature-card clay rounded-3xl bg-white p-8 space-y-4 ${f.span}`}
             >
-              <div className="space-y-4">
-                <p className="font-mono text-xs text-primary uppercase tracking-widest">
-                  {f.metric}
-                </p>
-                <h3 className="text-xl font-bold uppercase tracking-tight">
-                  {f.title}
-                </h3>
-                <p className="text-base-content/60 text-sm leading-relaxed">
-                  {f.desc}
-                </p>
-              </div>
+              <span
+                className={`inline-flex items-center justify-center w-12 h-12 rounded-2xl font-bold text-lg ${f.chip}`}
+              >
+                ▣
+              </span>
+              <p className="font-mono text-xs font-semibold text-primary">
+                {f.metric}
+              </p>
+              <h3 className="text-xl font-bold text-base-content">
+                {f.title}
+              </h3>
+              <p className="text-base-content/60 text-sm leading-relaxed">
+                {f.desc}
+              </p>
             </div>
           ))}
         </div>

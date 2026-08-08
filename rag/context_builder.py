@@ -69,6 +69,7 @@ class ContextBuilder:
                 end_line=item.chunk.end_line,
                 symbol=item.chunk.symbol,
                 language=item.chunk.language,
+                repo=item.chunk.repo,
             )
 
         logger.info(

@@ -16,7 +16,8 @@ If information is missing from context, say so explicitly.
 Prefer code-grounded explanations and concrete references.
 Do not hallucinate APIs, files, or behavior not present in context.
 Respond concisely in technical language.
-When making claims, cite relevant chunk IDs in square brackets, e.g. [C1], [C2]."""
+When making claims, cite the relevant chunk IDs in square brackets, e.g. [C1], [C2].
+Cite only chunks you actually reference and never invent citations; if an answer needs no grounding, do not cite."""
 
 
 class PromptBuilder:

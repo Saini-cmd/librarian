@@ -1,0 +1,533 @@
+/* ============================================================
+   LIBRARIAN DESIGN SYSTEM — single source of truth
+   ------------------------------------------------------------
+   This file dictates ALL design decisions: fonts, daisyUI theme
+   palettes, design tokens, effects (glass / glow / scanlines /
+   noise) and base styles.
+
+   THEME SWITCHING
+   - Active theme = the `data-theme` attribute on <html> (set in
+     index.html and via applyTheme() in src/theme/index.js).
+   - Adding a theme = add one @plugin "daisyui/theme" block + one
+     [data-theme="name"] token override below.
+   - Components must NOT hardcode colors/radius/borders — use
+     daisyUI semantic classes (bg-base-*, text-primary, ...) or
+     the --ds-* tokens defined here.
+
+   THEMES
+   - clay         (default) — playful claymorphism, puffy 3D surfaces
+   - apple-glass             — light iOS glass, system blue
+   - brutalist-dark          — dark terminal/brutalist
+   - glass                   — dark violet glassmorphism
+   ============================================================ */
+
+/* ------------------------------------------------------------
+   Font mapping (Tailwind utilities consume these)
+   ------------------------------------------------------------ */
+@theme {
+  --font-sans: var(--ds-font-sans);
+  --font-mono: var(--ds-font-mono);
+  --font-display: var(--ds-font-display);
+
+  /* Base font for the whole app (preflight reads this) */
+  --default-font-family: var(--font-sans);
+
+  /* Tokenize the "brutalist chrome" so border-2 / rounded-none
+     follow the active theme (2px+square on brutalist, 1px+rounded
+     on glass) instead of being hardcoded Tailwind defaults. */
+  --border-width-2: var(--border);
+  --radius-none: var(--radius-box);
+}
+
+/* ------------------------------------------------------------
+   daisyUI theme: clay  (default — playful claymorphism)
+   ------------------------------------------------------------ */
+@plugin "daisyui/theme" {
+  name: "clay";
+  default: true;
+  prefersdark: false;
+  color-scheme: light;
+
+  --color-base-100: oklch(0.95 0.02 265);
+  --color-base-200: oklch(0.91 0.025 265);
+  --color-base-300: oklch(0.87 0.03 265);
+  --color-base-content: oklch(0.32 0.06 265);
+
+  --color-primary: oklch(0.60 0.19 255);
+  --color-primary-content: oklch(0.99 0 0);
+
+  --color-secondary: oklch(0.99 0 0);
+  --color-secondary-content: oklch(0.35 0.06 265);
+
+  --color-accent: oklch(0.72 0.16 25);
+  --color-accent-content: oklch(0.99 0 0);
+
+  --color-neutral: oklch(0.40 0.05 265);
+  --color-neutral-content: oklch(0.99 0 0);
+
+  --color-info: oklch(0.62 0.16 250);
+  --color-info-content: oklch(0.99 0 0);
+
+  --color-success: oklch(0.66 0.15 150);
+  --color-success-content: oklch(0.99 0 0);
+
+  --color-warning: oklch(0.76 0.14 70);
+  --color-warning-content: oklch(0.25 0.03 70);
+
+  --color-error: oklch(0.60 0.18 25);
+  --color-error-content: oklch(0.99 0 0);
+
+  --radius-selector: 1rem;
+  --radius-field: 1rem;
+  --radius-box: 1.5rem;
+
+  --size-selector: 0.25rem;
+  --size-field: 0.25rem;
+
+  --border: 1px;
+  --depth: 1;
+  --noise: 0;
+}
+
+/* ------------------------------------------------------------
+   daisyUI theme: apple-glass  (light iOS glass)
+   ------------------------------------------------------------ */
+@plugin "daisyui/theme" {
+  name: "apple-glass";
+  default: false;
+  prefersdark: false;
+  color-scheme: light;
+
+  --color-base-100: oklch(0.97 0.004 250);
+  --color-base-200: oklch(0.94 0.004 250);
+  --color-base-300: oklch(0.90 0.005 250);
+  --color-base-content: oklch(0.27 0.02 250);
+
+  --color-primary: oklch(0.58 0.22 255);
+  --color-primary-content: oklch(0.99 0 0);
+
+  --color-secondary: oklch(0.55 0.02 250);
+  --color-secondary-content: oklch(0.99 0 0);
+
+  --color-accent: oklch(0.65 0.12 180);
+  --color-accent-content: oklch(0.99 0 0);
+
+  --color-neutral: oklch(0.55 0.02 250);
+  --color-neutral-content: oklch(0.99 0 0);
+
+  --color-info: oklch(0.6 0.18 230);
+  --color-info-content: oklch(0.99 0 0);
+
+  --color-success: oklch(0.65 0.16 150);
+  --color-success-content: oklch(0.99 0 0);
+
+  --color-warning: oklch(0.75 0.14 80);
+  --color-warning-content: oklch(0.2 0.04 80);
+
+  --color-error: oklch(0.58 0.19 25);
+  --color-error-content: oklch(0.99 0 0);
+
+  --radius-selector: 0.5rem;
+  --radius-field: 0.75rem;
+  --radius-box: 1.25rem;
+
+  --size-selector: 0.25rem;
+  --size-field: 0.25rem;
+
+  --border: 1px;
+  --depth: 1;
+  --noise: 0;
+}
+
+/* ------------------------------------------------------------
+   daisyUI theme: brutalist-dark
+   ------------------------------------------------------------ */
+@plugin "daisyui/theme" {
+  name: "brutalist-dark";
+  default: false;
+  prefersdark: true;
+  color-scheme: dark;
+
+  --color-base-100: oklch(13% 0 0);
+  --color-base-200: oklch(17% 0 0);
+  --color-base-300: oklch(21% 0 0);
+  --color-base-content: oklch(90% 0 0);
+
+  --color-primary: oklch(68% 0.33 145);
+  --color-primary-content: oklch(12% 0 0);
+
+  --color-secondary: oklch(78% 0.28 145);
+  --color-secondary-content: oklch(12% 0 0);
+
+  --color-accent: oklch(68% 0.33 145);
+  --color-accent-content: oklch(12% 0 0);
+
+  --color-neutral: oklch(21% 0 0);
+  --color-neutral-content: oklch(90% 0 0);
+
+  --color-info: oklch(65% 0.15 195);
+  --color-info-content: oklch(12% 0 0);
+
+  --color-success: oklch(68% 0.30 145);
+  --color-success-content: oklch(12% 0 0);
+
+  --color-warning: oklch(75% 0.15 75);
+  --color-warning-content: oklch(12% 0 0);
+
+  --color-error: oklch(55% 0.2 25);
+  --color-error-content: oklch(90% 0 0);
+
+  --radius-selector: 0rem;
+  --radius-field: 0rem;
+  --radius-box: 0rem;
+
+  --size-selector: 0.25rem;
+  --size-field: 0.25rem;
+
+  --border: 2px;
+  --depth: 0;
+  --noise: 0;
+}
+
+/* ------------------------------------------------------------
+   daisyUI theme: glass  (soft dark glassmorphism)
+   ------------------------------------------------------------ */
+@plugin "daisyui/theme" {
+  name: "glass";
+  default: false;
+  prefersdark: true;
+  color-scheme: dark;
+
+  --color-base-100: oklch(22% 0.025 280);
+  --color-base-200: oklch(27% 0.03 280);
+  --color-base-300: oklch(32% 0.03 280);
+  --color-base-content: oklch(93% 0.01 280);
+
+  --color-primary: oklch(72% 0.16 285);
+  --color-primary-content: oklch(14% 0.03 285);
+
+  --color-secondary: oklch(72% 0.12 200);
+  --color-secondary-content: oklch(14% 0.02 200);
+
+  --color-accent: oklch(76% 0.14 165);
+  --color-accent-content: oklch(14% 0.02 165);
+
+  --color-neutral: oklch(30% 0.02 280);
+  --color-neutral-content: oklch(93% 0.01 280);
+
+  --color-info: oklch(72% 0.12 230);
+  --color-info-content: oklch(14% 0.02 230);
+
+  --color-success: oklch(70% 0.16 150);
+  --color-success-content: oklch(14% 0.02 150);
+
+  --color-warning: oklch(80% 0.14 85);
+  --color-warning-content: oklch(18% 0.03 85);
+
+  --color-error: oklch(64% 0.2 25);
+  --color-error-content: oklch(93% 0.01 25);
+
+  --radius-selector: 0.5rem;
+  --radius-field: 0.75rem;
+  --radius-box: 1rem;
+
+  --size-selector: 0.25rem;
+  --size-field: 0.25rem;
+
+  --border: 1px;
+  --depth: 1;
+  --noise: 0;
+}
+
+/* ------------------------------------------------------------
+   Design tokens — neutral defaults (brutalist = the baseline)
+   ------------------------------------------------------------ */
+:root {
+  /* Typography */
+  --ds-font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --ds-font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --ds-font-display: "Inter", ui-sans-serif, system-ui, sans-serif;
+
+  /* Effects */
+  --ds-glow: oklch(68% 0.33 145);
+  --ds-scanline-color: oklch(68% 0.33 145 / 0.07);
+  --ds-noise-opacity: 0.06;
+  --ds-theme-color: #0a0a0a;
+
+  /* Glass surface (off by default — solid panel fallback) */
+  --ds-glass-bg: var(--color-base-200);
+  --ds-glass-border: var(--color-base-300);
+  --ds-glass-blur: 0px;
+  --ds-glass-saturate: 1;
+
+  /* Symbol graph (React Flow consumes these via useGraphTheme) */
+  --ds-graph-file: #4a7c9b;
+  --ds-graph-class: #8b6fb0;
+  --ds-graph-interface: #7dd3fc;
+  --ds-graph-impl: #c9a06c;
+  --ds-graph-method: #b07a8a;
+  --ds-graph-function: #5a9e6f;
+  --ds-graph-entity: #788291;
+  --ds-graph-edge-defines: #fb923c;
+  --ds-graph-edge-imports: #facc15;
+  --ds-graph-edge-used_in: #2dd4bf;
+  --ds-graph-edge-uses: #22c55e;
+  --ds-graph-bg: #0c0c0c;
+  --ds-graph-grid: #262626;
+  --ds-graph-minimap: #3f3f46;
+  --ds-graph-neutral: #4b4b4f;
+  --ds-graph-fallback: #71717a;
+  --ds-graph-color-mode: dark;
+
+  /* Clay surface (puffy 3D shadows) */
+  --ds-clay-surface: #ffffff;
+  --ds-clay-shade: oklch(0.5 0.05 250);
+}
+
+/* ------------------------------------------------------------
+   Per-theme token overrides
+   ------------------------------------------------------------ */
+[data-theme="glass"] {
+  --ds-font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --ds-font-mono: "JetBrains Mono", ui-monospace, monospace;
+  --ds-font-display: "Inter", ui-sans-serif, system-ui, sans-serif;
+
+  --ds-glow: oklch(72% 0.16 285);
+  --ds-scanline-color: oklch(72% 0.16 285 / 0.05);
+  --ds-noise-opacity: 0.03;
+  --ds-theme-color: #151522;
+
+  --ds-glass-bg: color-mix(in oklab, var(--color-base-200) 55%, transparent);
+  --ds-glass-border: color-mix(in oklab, var(--color-base-content) 12%, transparent);
+  --ds-glass-blur: 14px;
+  --ds-glass-saturate: 1.4;
+
+  --ds-graph-bg: #101019;
+  --ds-graph-grid: #2a2a3a;
+  --ds-graph-minimap: #33334a;
+  --ds-graph-neutral: #3f3f4f;
+}
+
+[data-theme="apple-glass"] {
+  --ds-font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --ds-font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --ds-font-display: "Inter", ui-sans-serif, system-ui, sans-serif;
+
+  --ds-glow: oklch(0.58 0.22 255);
+  --ds-scanline-color: transparent;
+  --ds-noise-opacity: 0;
+  --ds-theme-color: #f5f5f7;
+
+  --ds-glass-bg: color-mix(in oklab, #ffffff 55%, transparent);
+  --ds-glass-border: color-mix(in oklab, var(--color-base-content) 8%, transparent);
+  --ds-glass-blur: 24px;
+  --ds-glass-saturate: 1.8;
+
+  /* Symbol graph — light-surface palette */
+  --ds-graph-file: #0a84ff;
+  --ds-graph-class: #af52de;
+  --ds-graph-interface: #00c7be;
+  --ds-graph-impl: #ff9f0a;
+  --ds-graph-method: #ff375f;
+  --ds-graph-function: #34c759;
+  --ds-graph-entity: #8e8e93;
+  --ds-graph-edge-defines: #ff9f0a;
+  --ds-graph-edge-imports: #ffd60a;
+  --ds-graph-edge-used_in: #64d2ff;
+  --ds-graph-edge-uses: #30d158;
+  --ds-graph-bg: #f5f5f7;
+  --ds-graph-grid: #e5e5ea;
+  --ds-graph-minimap: #d1d1d6;
+  --ds-graph-neutral: #c7c7cc;
+  --ds-graph-fallback: #8e8e93;
+  --ds-graph-color-mode: light;
+}
+
+[data-theme="clay"] {
+  --ds-font-sans: "Montserrat", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --ds-font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --ds-font-display: "Poppins", ui-sans-serif, system-ui, sans-serif;
+
+  --ds-glow: oklch(0.60 0.19 255);
+  --ds-scanline-color: transparent;
+  --ds-noise-opacity: 0;
+  --ds-theme-color: #eef0fb;
+
+  --ds-glass-bg: #ffffff;
+  --ds-glass-border: color-mix(in oklab, var(--color-base-content) 8%, transparent);
+  --ds-glass-blur: 0px;
+  --ds-glass-saturate: 1;
+
+  --ds-clay-surface: #ffffff;
+  --ds-clay-shade: oklch(0.32 0.06 265);
+
+  /* Symbol graph — light-surface palette (clay-friendly) */
+  --ds-graph-file: #3b82f6;
+  --ds-graph-class: #af52de;
+  --ds-graph-interface: #06b6d4;
+  --ds-graph-impl: #f59e0b;
+  --ds-graph-method: #f43f5e;
+  --ds-graph-function: #22c55e;
+  --ds-graph-entity: #8b8ba7;
+  --ds-graph-edge-defines: #f59e0b;
+  --ds-graph-edge-imports: #eab308;
+  --ds-graph-edge-used_in: #22d3ee;
+  --ds-graph-edge-uses: #22c55e;
+  --ds-graph-bg: #eef0fb;
+  --ds-graph-grid: #dde0f2;
+  --ds-graph-minimap: #cdd1e8;
+  --ds-graph-neutral: #c0c4dd;
+  --ds-graph-fallback: #8b8ba7;
+  --ds-graph-color-mode: light;
+}
+
+/* ------------------------------------------------------------
+   Effect utilities
+   ------------------------------------------------------------ */
+
+/* Translucent blurred surface. On themes where glass is off the
+   tokens fall back to a solid base surface. */
+.glass-panel {
+  background: var(--ds-glass-bg);
+  border: 1px solid var(--ds-glass-border);
+  -webkit-backdrop-filter: blur(var(--ds-glass-blur)) saturate(var(--ds-glass-saturate));
+  backdrop-filter: blur(var(--ds-glass-blur)) saturate(var(--ds-glass-saturate));
+}
+
+/* Themed glow (selection ring / emphasis) */
+.glow {
+  box-shadow: 0 0 14px color-mix(in oklab, var(--ds-glow) 35%, transparent);
+}
+
+/* iOS-style translucent surfaces — all derive from --ds-glass-* tokens.
+   On non-glass themes (blur 0) they fall back to a solid surface. */
+.glass-surface {
+  background: var(--ds-glass-bg);
+  -webkit-backdrop-filter: blur(var(--ds-glass-blur)) saturate(var(--ds-glass-saturate));
+  backdrop-filter: blur(var(--ds-glass-blur)) saturate(var(--ds-glass-saturate));
+}
+
+.glass-nav {
+  background: var(--ds-glass-bg);
+  -webkit-backdrop-filter: blur(var(--ds-glass-blur)) saturate(var(--ds-glass-saturate));
+  backdrop-filter: blur(var(--ds-glass-blur)) saturate(var(--ds-glass-saturate));
+  border-bottom: 1px solid var(--ds-glass-border);
+}
+
+.glass-composer {
+  background: var(--ds-glass-bg);
+  border: 1px solid var(--ds-glass-border);
+  -webkit-backdrop-filter: blur(var(--ds-glass-blur)) saturate(var(--ds-glass-saturate));
+  backdrop-filter: blur(var(--ds-glass-blur)) saturate(var(--ds-glass-saturate));
+  box-shadow: 0 10px 30px -12px rgb(0 0 0 / 0.2);
+}
+
+.glass-card {
+  background: var(--ds-glass-bg);
+  border: 1px solid var(--ds-glass-border);
+  -webkit-backdrop-filter: blur(var(--ds-glass-blur)) saturate(var(--ds-glass-saturate));
+  backdrop-filter: blur(var(--ds-glass-blur)) saturate(var(--ds-glass-saturate));
+  box-shadow: 0 4px 20px -8px rgb(0 0 0 / 0.12);
+}
+
+/* Claymorphism — puffy 3D surfaces. Shadows only (background/radius come
+   from utilities) so they compose with any Tailwind color class. */
+.clay {
+  box-shadow:
+    inset 0 6px 8px -4px color-mix(in oklab, #ffffff 90%, transparent),
+    inset 0 -6px 8px -4px color-mix(in oklab, var(--ds-clay-shade) 22%, transparent),
+    0 6px 18px -6px color-mix(in oklab, var(--ds-clay-shade) 28%, transparent);
+}
+
+.clay-press {
+  box-shadow:
+    inset 0 5px 6px -4px color-mix(in oklab, #ffffff 95%, transparent),
+    inset 0 -6px 8px -4px color-mix(in oklab, var(--ds-clay-shade) 24%, transparent),
+    0 8px 18px -6px color-mix(in oklab, var(--ds-clay-shade) 34%, transparent);
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+  cursor: pointer;
+}
+
+.clay-press:hover {
+  transform: translateY(-1px);
+}
+
+.clay-press:active {
+  transform: translateY(2px);
+  box-shadow:
+    inset 0 5px 8px -2px color-mix(in oklab, var(--ds-clay-shade) 26%, transparent),
+    inset 0 -4px 6px -3px color-mix(in oklab, var(--ds-clay-shade) 12%, transparent),
+    0 2px 6px -2px color-mix(in oklab, var(--ds-clay-shade) 24%, transparent);
+}
+
+.clay-press:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+}
+
+/* Clay depth for ring/outline shapes */
+.clay-ring {
+  filter: drop-shadow(0 10px 14px color-mix(in oklab, var(--ds-clay-shade) 22%, transparent));
+}
+
+/* CRT phosphor scanline overlay — color tracks the theme accent */
+.scanlines::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 9999;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    var(--ds-scanline-color) 2px,
+    var(--ds-scanline-color) 4px
+  );
+}
+
+/* SVG mechanical noise grain */
+.noise::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 9998;
+  opacity: var(--ds-noise-opacity);
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-repeat: repeat;
+  background-size: 256px 256px;
+}
+
+/* Symbol graph canvas surface */
+.graph-surface {
+  background-color: var(--ds-graph-bg);
+}
+
+/* ------------------------------------------------------------
+   Base layer — follows the active theme, never hardcoded
+   ------------------------------------------------------------ */
+html {
+  scroll-behavior: smooth;
+  background-color: var(--color-base-100);
+}
+
+body {
+  margin: 0;
+  background-color: var(--color-base-100);
+  color: var(--color-base-content);
+}
+
+#root {
+  background-color: var(--color-base-100);
+}
+
+/* Headings use the display font (Poppins on clay, Inter elsewhere) */
+h1,
+h2,
+h3,
+h4,
+h5 {
+  font-family: var(--ds-font-display);
+}

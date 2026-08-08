@@ -6,6 +6,7 @@ Custom React hooks shared across components and pages.
 ## Ownership
 - `useMarkdown.js` — Parses raw markdown → sanitized HTML via `marked` + `DOMPurify`
 - `useApi.js` — Generic async-call wrapper with `{ data, loading, error, execute, reset }` state
+- Note: `useGraphTheme` (theme-driven graph colors) lives in `src/theme/index.js`, not here — it is tightly coupled to the theme registry
 
 ## Local Contracts
 - Hooks are pure React — no side effects outside of `useEffect` boundaries

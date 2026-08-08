@@ -5,6 +5,9 @@ import { BrowserRouter } from 'react-router-dom';
 import App from './App';
 import './styles.css';
 import { setTokenProvider } from './api/client';
+import { applyTheme, DEFAULT_THEME } from './theme';
+
+applyTheme(DEFAULT_THEME);
 
 const PUBLISHABLE_KEY = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY;
 

@@ -77,6 +77,7 @@ class ProcessResponse(BaseModel):
     files_discovered: int
     chunks_created: int
     message: str
+    conversation_id: str | None = None
 
 
 class ChatResponse(BaseModel):
@@ -105,6 +106,12 @@ def process_repository(
     user = upsert_user(db, clerk_id)
 
     if user_repo_exists(db, user.id, repo_name):
+        conv = get_or_create_conversation(
+            db,
+            user.id,
+            repo_name=repo_name,
+            repo_url=payload.repo_url,
+        )
         update_pipeline_state(
             db,
             phase="ready",
@@ -120,6 +127,7 @@ def process_repository(
             files_discovered=0,
             chunks_created=0,
             message="Repository already indexed. Reusing existing chunks and embeddings.",
+            conversation_id=str(conv.id),
         )
 
     update_pipeline_state(
@@ -165,12 +173,20 @@ def process_repository(
         if result.graph is not None:
             save_repo_graph(db, result.repo_name, result.graph)
 
+        conv = get_or_create_conversation(
+            db,
+            user.id,
+            repo_name=result.repo_name,
+            repo_url=payload.repo_url,
+        )
+
         return ProcessResponse(
             repo_url=payload.repo_url,
             repo_name=result.repo_name,
             files_discovered=result.files_discovered,
             chunks_created=result.chunks_created,
             message="Repository ingested, chunked, summarized, and embedded successfully.",
+            conversation_id=str(conv.id),
         )
     except Exception as e:
         update_pipeline_state(
@@ -208,7 +224,13 @@ def chat(
     result = get_answer_generator().generate(
         query=payload.message, retrieved_chunks=retrieved, stream=True
     )
-    add_message(db, conversation.id, "assistant", result.answer)
+    add_message(
+        db,
+        conversation.id,
+        "assistant",
+        result.answer,
+        citations=[asdict(c) for c in result.citations],
+    )
     _persist_qa(db, repo_name, payload.message, result.answer, result.citations)
 
     return ChatResponse(answer=result.answer, citations=[asdict(c) for c in result.citations])
@@ -249,8 +271,16 @@ def chat_stream(payload: ChatRequest, clerk_id: str = Depends(get_current_user))
             yield f"event: error\ndata: {json.dumps({'error': str(exc)})}\n\n"
         else:
             answer = "".join(full_answer)
-            add_message(db, conversation.id, "assistant", answer)
-            _persist_qa(db, repo_name, payload.message, answer, [])
+            citations = AnswerGenerator._map_citations(answer, context)
+            add_message(
+                db,
+                conversation.id,
+                "assistant",
+                answer,
+                citations=[asdict(c) for c in citations],
+            )
+            _persist_qa(db, repo_name, payload.message, answer, citations)
+            yield f"data: {json.dumps({'citations': [asdict(c) for c in citations]})}\n\n"
         finally:
             db.close()
         yield f"data: {json.dumps({'done': True})}\n\n"

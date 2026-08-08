@@ -4,12 +4,14 @@ import Layout from "../components/Layout";
 import RepoInput from "../components/RepoInput";
 import ProgressBar from "../components/ProgressBar";
 import ChatMessages from "../components/ChatMessages";
+import CitationCard from "../components/CitationCard";
 import SymbolGraphView from "../components/SymbolGraphView";
 import {
   getStatus,
   getConversations,
   getConversation,
   deleteConversation,
+  createConversation,
   getRepositories,
   getRepoGraph,
 } from "../api/client";
@@ -36,6 +38,7 @@ export default function AppPage() {
   const [graphRepo, setGraphRepo] = useState(null);
   const [graphLoading, setGraphLoading] = useState(false);
   const [graphError, setGraphError] = useState("");
+  const [openCitation, setOpenCitation] = useState(null);
   const abortRef = useRef(null);
   const pollRef = useRef(null);
   const msgIdRef = useRef(0);
@@ -126,12 +129,18 @@ export default function AppPage() {
     const repoName = extractRepoName(repoUrl);
     const existing = repositories.find((r) => r.repo_name === repoName);
     if (existing) {
-      setActiveConvId(null);
       setMessages([]);
       setPhase("ready");
       setChatEnabled(true);
       setSelectedRepo(existing.repo_name);
       setStatusText("Repo already indexed — opened a new chat.");
+      try {
+        const conv = await createConversation(undefined, existing.repo_name, existing.repo_url);
+        setActiveConvId(conv?.id || null);
+      } catch {
+        setActiveConvId(null);
+      }
+      await loadConversations();
       return;
     }
 
@@ -158,6 +167,9 @@ export default function AppPage() {
         throw new Error(errText || "Pipeline request failed");
       }
 
+      const data = await res.json();
+      if (data?.conversation_id) setActiveConvId(data.conversation_id);
+
       setStatusText("Repository processing started.");
       startPolling();
     } catch (err) {
@@ -169,6 +181,7 @@ export default function AppPage() {
 
   async function handleSelectConversation(convId) {
     setActiveConvId(convId);
+    setOpenCitation(null);
     try {
       const data = await getConversation(convId);
       setSelectedRepo(data.repo_name || null);
@@ -177,6 +190,7 @@ export default function AppPage() {
           id: m.id,
           role: m.role,
           content: m.content,
+          citations: m.citations || [],
         }))
       );
       setPhase("ready");
@@ -189,6 +203,7 @@ export default function AppPage() {
   async function handleNewChat() {
     setActiveConvId(null);
     setMessages([]);
+    setOpenCitation(null);
     setSelectedRepo(null);
     setPhase("idle");
     setProgress(0);
@@ -204,12 +219,21 @@ export default function AppPage() {
     } catch {}
   }
 
+  function handleCitationClick(citation, rect) {
+    setOpenCitation((cur) =>
+      cur && cur.citation.chunk_id === citation.chunk_id
+        ? null
+        : { citation, anchorRect: rect }
+    );
+  }
+
   async function submitMessage(e) {
     e.preventDefault();
     if (!draft.trim() || !chatEnabled) return;
 
     const userMsg = draft.trim();
     setDraft("");
+    setOpenCitation(null);
     const userMsgId = `local-${++msgIdRef.current}`;
     const placeholderId = `local-${++msgIdRef.current}`;
     setMessages((prev) => [
@@ -247,6 +271,7 @@ export default function AppPage() {
       const decoder = new TextDecoder();
       let buffer = "";
       let assembled = "";
+      let finalCitations = [];
       let done = false;
 
       while (!done) {
@@ -264,6 +289,7 @@ export default function AppPage() {
                 try {
                   const event = JSON.parse(payload);
                   if (event.done) { done = true; break; }
+                  if (event.citations) finalCitations = event.citations;
                   if (typeof event.token === "string") {
                     assembled += event.token;
                     setMessages((prev) =>
@@ -281,6 +307,11 @@ export default function AppPage() {
         }
       }
 
+      setMessages((prev) =>
+        prev.map((msg) =>
+          msg.id === placeholderId ? { ...msg, citations: finalCitations } : msg
+        )
+      );
       setStreaming(false);
     } catch (err) {
       if (err.name === "AbortError") return;
@@ -303,35 +334,42 @@ export default function AppPage() {
       <div className="flex flex-col h-dvh overflow-hidden">
         {phase === "ready" ? (
           <>
-            <div className="border-b-2 border-base-300 px-6 py-3 flex items-center justify-between gap-4">
-              <div className="flex items-center gap-4 min-w-0">
-                <h1 className="font-bold text-sm uppercase tracking-wider truncate" title={selectedRepo || ""}>
-                  {selectedRepo ? selectedRepo : "No repo"}
-                </h1>
-              </div>
-              <label className="flex items-center gap-2 cursor-pointer shrink-0">
-                <span
-                  className={`font-mono text-[10px] uppercase tracking-widest ${
-                    view === "chat" ? "text-primary" : "text-base-content/40"
+            <div className="glass-nav px-6 py-3 flex items-center justify-between gap-4 shrink-0">
+              <h1
+                className="text-base font-semibold truncate text-base-content"
+                title={selectedRepo || ""}
+              >
+                {selectedRepo ? selectedRepo : "No repo"}
+              </h1>
+              <div className="flex items-center rounded-full bg-base-content/5 p-1 shrink-0">
+                <button
+                  type="button"
+                  className={`px-4 py-1.5 rounded-full text-xs font-medium transition-colors ${
+                    view === "chat"
+                      ? "bg-base-100 shadow-sm text-base-content"
+                      : "text-base-content/50"
                   }`}
+                  onClick={() => setView("chat")}
+                  disabled={!chatEnabled || !selectedRepo}
                 >
                   Chat
-                </span>
-                <input
-                  type="checkbox"
-                  className="toggle toggle-primary toggle-sm"
-                  checked={view === "graph"}
-                  onChange={(e) => setView(e.target.checked ? "graph" : "chat")}
-                  disabled={!chatEnabled || !selectedRepo}
-                />
-                <span
-                  className={`font-mono text-[10px] uppercase tracking-widest ${
-                    view === "graph" ? "text-primary" : "text-base-content/40"
+                </button>
+                <button
+                  type="button"
+                  className={`px-4 py-1.5 rounded-full text-xs font-medium transition-colors ${
+                    view === "graph"
+                      ? "bg-base-100 shadow-sm text-base-content"
+                      : "text-base-content/50"
                   }`}
+                  onClick={() => {
+                    setView("graph");
+                    setOpenCitation(null);
+                  }}
+                  disabled={!chatEnabled || !selectedRepo}
                 >
                   Graph
-                </span>
-              </label>
+                </button>
+              </div>
             </div>
 
             {view === "graph" ? (
@@ -342,13 +380,25 @@ export default function AppPage() {
               />
             ) : (
               <>
-                <ChatMessages messages={messages} streaming={streaming} />
+                <ChatMessages
+                  messages={messages}
+                  streaming={streaming}
+                  onCitationClick={handleCitationClick}
+                />
+
+                {openCitation && (
+                  <CitationCard
+                    citation={openCitation.citation}
+                    anchorRect={openCitation.anchorRect}
+                    onClose={() => setOpenCitation(null)}
+                  />
+                )}
 
                 <form
                   onSubmit={submitMessage}
-                  className="border-t-2 border-base-300 p-4"
+                  className="px-4 pb-4 shrink-0"
                 >
-                  <div className="join w-full max-w-4xl mx-auto">
+                  <div className="glass-composer rounded-full max-w-3xl mx-auto flex items-center gap-2 pl-5 pr-2 py-2">
                     <input
                       value={draft}
                       onChange={(e) => setDraft(e.target.value)}
@@ -357,15 +407,15 @@ export default function AppPage() {
                           ? "Ask about the repository..."
                           : "Processing must complete first"
                       }
-                      className="input input-bordered join-item w-full font-mono text-sm"
+                      className="flex-1 bg-transparent outline-none text-sm text-base-content placeholder:text-base-content/40"
                       disabled={!chatEnabled}
                     />
                     <button
                       type="submit"
-                      className="btn join-item"
+                      className="btn btn-primary btn-circle btn-sm rounded-full shrink-0"
                       disabled={!chatEnabled || !draft.trim()}
                     >
-                      Send
+                      <span className="text-base leading-none">➤</span>
                     </button>
                   </div>
                 </form>
@@ -373,14 +423,14 @@ export default function AppPage() {
             )}
           </>
         ) : (
-          <div className="flex-1 flex items-center justify-center p-8">
-            <div className="w-full max-w-2xl mx-auto space-y-12">
+          <div className="flex-1 flex items-center justify-center p-8 bg-base-100">
+            <div className="w-full max-w-2xl mx-auto space-y-10">
               <div className="text-center space-y-2">
-                <h2 className="text-3xl lg:text-5xl font-black uppercase tracking-tight">
-                  Librarian <span className="text-primary">AI</span>
+                <h2 className="text-4xl lg:text-5xl font-bold tracking-tight text-base-content">
+                  Librarian AI
                 </h2>
-                <p className="text-base-content/50 text-xs font-mono uppercase tracking-widest">
-                  [ REPOSITORY INGESTION ]
+                <p className="text-base-content/50 text-sm">
+                  Repository ingestion
                 </p>
               </div>
 

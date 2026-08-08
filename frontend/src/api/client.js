@@ -89,6 +89,13 @@ export async function getFileSummary(repoName, filePath) {
   return data;
 }
 
+export async function getChunk(repoName, chunkId) {
+  const { data } = await client.get(
+    `/repositories/${encodeURIComponent(repoName)}/chunks/${encodeURIComponent(chunkId)}`
+  );
+  return data;
+}
+
 export async function getProfile() {
   const { data } = await client.get("/users/me");
   return data;

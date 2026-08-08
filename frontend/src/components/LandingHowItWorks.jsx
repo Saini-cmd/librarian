@@ -1,6 +1,7 @@
 import { useRef, useLayoutEffect } from "react";
 import gsap from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
+import ClayShapes from "./ClayShapes";
 
 const steps = [
   {
@@ -18,6 +19,13 @@ const steps = [
     title: "Ask Questions",
     desc: "Chat naturally about the code. Find functions, understand logic, trace dependencies instantly.",
   },
+];
+
+const SECTION_SHAPES = [
+  { type: "blob", size: 56, x: 6, y: 10, color: "text-primary/20", float: 14, duration: 7 },
+  { type: "egg", size: 42, x: 92, y: 12, color: "text-success/20", float: 10, duration: 8 },
+  { type: "circle", size: 28, x: 90, y: 84, color: "text-accent/25", float: 12, duration: 6 },
+  { type: "ring", size: 36, x: 8, y: 86, color: "text-warning/25", spin: -360, duration: 8 },
 ];
 
 export default function LandingHowItWorks() {
@@ -39,7 +47,7 @@ export default function LandingHowItWorks() {
 
       ScrollTrigger.create({
         trigger: section.current,
-        start: "top 50%",
+        start: "top 55%",
         toggleActions: "play none none none",
         onEnter: () => {
           const tl = gsap.timeline();
@@ -59,34 +67,33 @@ export default function LandingHowItWorks() {
   }, []);
 
   return (
-    <section ref={section} className="border-b-2 border-base-300">
-      <div className="max-w-6xl mx-auto px-6 py-20">
-        <div className="text-center mb-16 space-y-4">
-          <p className="workflow-badge font-mono text-xs uppercase tracking-[0.2em] text-primary">
-            [ WORKFLOW ]
-          </p>
-          <h2 className="workflow-heading text-3xl lg:text-5xl font-black tracking-tight uppercase">
+    <section ref={section} className="relative bg-base-100">
+      <ClayShapes shapes={SECTION_SHAPES} />
+
+      <div className="max-w-6xl mx-auto px-6 py-24 relative">
+        <div className="text-center mb-14 space-y-4">
+          <span className="workflow-badge inline-block rounded-full bg-white px-5 py-2 text-sm font-semibold text-primary clay">
+            Workflow
+          </span>
+          <h2 className="workflow-heading text-4xl lg:text-5xl font-extrabold tracking-tight text-base-content">
             How it works
           </h2>
         </div>
 
-        <div
-          ref={gridRef}
-          className="grid grid-cols-1 md:grid-cols-3 gap-0 border-2 border-base-300"
-        >
+        <div ref={gridRef} className="relative grid grid-cols-1 md:grid-cols-3 gap-8">
           {steps.map((step, i) => (
             <div
               key={i}
-              className={`step-card p-8 lg:p-10 border-b-2 md:border-b-0 ${
-                i < steps.length - 1 ? "md:border-r-2" : ""
-              } ${i === steps.length - 1 ? "border-b-0" : ""}`}
+              className={`step-card clay relative rounded-3xl bg-white p-8 space-y-4 ${
+                i === 1 ? "md:translate-y-10" : ""
+              }`}
               style={{ perspective: "1000px" }}
             >
-              <div className="space-y-4">
-                <p className="font-mono text-5xl font-black text-primary">
-                  {step.num}
-                </p>
-                <h3 className="text-xl font-bold uppercase tracking-tight">
+              <span className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-primary text-primary-content text-xl font-extrabold clay relative">
+                {step.num}
+              </span>
+              <div className="space-y-2">
+                <h3 className="text-xl font-bold text-base-content">
                   {step.title}
                 </h3>
                 <p className="text-base-content/60 text-sm leading-relaxed">

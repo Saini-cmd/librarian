@@ -125,6 +125,7 @@ open http://localhost:8080             # Adminer — Postgres GUI (opt-in, tools
 ```
 
 - Adminer start/stop (opt-in service, does NOT run with normal `docker compose up -d`):
+  - Reset: `docker rm -f librarian-adminer`
   - Start: `docker compose --profile tools up -d`
   - Stop: `docker compose stop adminer`
 - Adminer login: system `PostgreSQL`, server `postgres`, user `librarian`, password `librarian`, db `librarian`

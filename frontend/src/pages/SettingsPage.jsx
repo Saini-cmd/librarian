@@ -33,29 +33,29 @@ export default function SettingsPage() {
     <div className="min-h-screen bg-base-100 text-base-content">
       <div className="max-w-2xl mx-auto px-6 py-12 space-y-8">
         <button
-          className="btn btn-ghost btn-sm font-mono text-xs uppercase tracking-wider"
+          className="btn btn-ghost btn-sm rounded-full font-medium text-sm"
           onClick={() => navigate("/app")}
         >
           &larr; Back to App
         </button>
 
-        <div className="border-2 border-base-300 p-8 space-y-6">
-          <h1 className="text-2xl font-black uppercase tracking-tight">
+        <div className="glass-card rounded-2xl p-8 space-y-6">
+          <h1 className="text-2xl font-bold tracking-tight text-base-content">
             Settings
           </h1>
 
           <div className="space-y-2">
-            <p className="font-mono text-xs uppercase tracking-widest text-base-content/50">
+            <p className="text-xs font-medium uppercase tracking-wider text-base-content/50">
               Account
             </p>
-            <p className="font-mono text-sm text-base-content/70">
+            <p className="text-sm text-base-content/70">
               {user?.primaryEmailAddress?.emailAddress || "No email"}
             </p>
           </div>
 
           <form onSubmit={handleSave} className="space-y-4">
             <div className="space-y-2">
-              <label className="font-mono text-xs uppercase tracking-widest text-base-content/50">
+              <label className="text-xs font-medium uppercase tracking-wider text-base-content/50">
                 Display Name
               </label>
               <input
@@ -68,21 +68,21 @@ export default function SettingsPage() {
             </div>
 
             <div className="flex items-center gap-4">
-              <button type="submit" className="btn">
+              <button type="submit" className="btn btn-primary rounded-full px-6">
                 Save
               </button>
               {saved && (
-                <span className="font-mono text-xs text-success uppercase tracking-wider">
+                <span className="text-xs text-success uppercase tracking-wider">
                   Saved
                 </span>
               )}
             </div>
           </form>
 
-          <hr className="border-base-300" />
+          <hr className="border-base-content/10" />
 
           <button
-            className="btn btn-outline text-xs font-mono uppercase tracking-wider"
+            className="btn btn-ghost btn-outline rounded-full px-6 text-xs font-medium"
             onClick={() => signOut()}
           >
             Sign Out

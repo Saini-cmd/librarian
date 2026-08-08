@@ -187,8 +187,19 @@ def get_or_create_conversation(
     return conv
 
 
-def add_message(db: Session, conversation_id: Any, role: str, content: str) -> Message:
-    msg = Message(conversation_id=conversation_id, role=role, content=content)
+def add_message(
+    db: Session,
+    conversation_id: Any,
+    role: str,
+    content: str,
+    citations: list[dict] | None = None,
+) -> Message:
+    msg = Message(
+        conversation_id=conversation_id,
+        role=role,
+        content=content,
+        citations=citations or [],
+    )
     db.add(msg)
     db.commit()
     db.refresh(msg)

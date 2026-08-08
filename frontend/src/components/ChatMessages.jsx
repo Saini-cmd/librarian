@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import MessageContent from "./MessageContent";
 
-export default function ChatMessages({ messages, streaming }) {
+export default function ChatMessages({ messages, streaming, onCitationClick }) {
   const bottomRef = useRef(null);
 
   useEffect(() => {
@@ -9,15 +9,15 @@ export default function ChatMessages({ messages, streaming }) {
   }, [messages, streaming]);
 
   return (
-    <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-4">
+    <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-3 bg-base-100">
       {messages.length === 0 && !streaming && (
         <div className="min-h-full flex items-center justify-center">
           <div className="text-center">
-            <p className="text-xl font-black uppercase tracking-tight text-base-content/80">
+            <p className="text-lg font-semibold text-base-content/70">
               Ready to chat
             </p>
-            <p className="mt-2 text-base-content/40 text-xs font-mono uppercase tracking-widest">
-              The repository is ingested — ask anything about the codebase
+            <p className="mt-1.5 text-sm text-base-content/40">
+              Ask anything about the repository
             </p>
           </div>
         </div>
@@ -31,14 +31,19 @@ export default function ChatMessages({ messages, streaming }) {
           <div
             className={`chat-bubble text-sm leading-relaxed ${
               msg.role === "user"
-                ? "bg-primary text-primary-content rounded-none"
-                : "bg-base-300 text-base-content rounded-none"
+                ? "chat-bubble-primary"
+                : "bg-base-200 text-base-content"
             }`}
           >
             {msg.role === "assistant" && msg.content === "" && streaming ? (
               <span className="loading loading-dots loading-sm" />
             ) : (
-              <MessageContent role={msg.role} content={msg.content} />
+              <MessageContent
+                role={msg.role}
+                content={msg.content}
+                citations={msg.citations}
+                onCitationClick={onCitationClick}
+              />
             )}
           </div>
         </div>

@@ -39,12 +39,12 @@ export default function LandingFooter() {
   }, []);
 
   return (
-    <footer ref={section} className="footer footer-horizontal footer-center p-10 bg-base-200 border-t-2 border-base-300">
-      <div className="footer-content space-y-2">
-        <p className="font-mono text-xs uppercase tracking-[0.2em] text-primary">
-          [ LIBRARIAN AI ]
+    <footer ref={section} className="bg-base-100 border-t border-base-content/10">
+      <div className="footer-content max-w-6xl mx-auto px-6 py-10 text-center space-y-2">
+        <p className="text-sm font-semibold text-base-content/70">
+          Librarian AI
         </p>
-        <p className="text-base-content/40 text-xs font-mono uppercase tracking-wider">
+        <p className="text-xs text-base-content/40">
           &copy; {new Date().getFullYear()} — Built with React, FastAPI &amp; Qdrant
         </p>
       </div>

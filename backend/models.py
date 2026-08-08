@@ -71,6 +71,7 @@ class Message(Base):
     )
     role: Mapped[str] = mapped_column(String(20))
     content: Mapped[str] = mapped_column(Text)
+    citations: Mapped[list[dict]] = mapped_column(JSON, default=list)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
     conversation: Mapped["Conversation"] = relationship(back_populates="messages")

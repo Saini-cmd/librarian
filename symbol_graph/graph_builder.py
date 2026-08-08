@@ -96,8 +96,10 @@ def _identifiers_for_content(language: str, content: str) -> set[str]:
 
     Collects every node whose type ends with 'identifier' (identifier,
     type_identifier, field_identifier, property_identifier, method_identifier),
-    which covers real references across tree-sitter grammars. Unsupported
-    languages or parse errors are skipped gracefully.
+    which covers real references across tree-sitter grammars, plus `constant`
+    nodes (Ruby class/module/constant references, which are a distinct node type
+    in tree-sitter-ruby). Unsupported languages or parse errors are skipped
+    gracefully.
     """
     tree = _parse(language, content)
     if tree is None:
@@ -106,7 +108,7 @@ def _identifiers_for_content(language: str, content: str) -> set[str]:
     stack = [tree.root_node]
     while stack:
         node = stack.pop()
-        if node.type.endswith("identifier"):
+        if node.type.endswith("identifier") or node.type == "constant":
             text = node.text
             if text:
                 try:
@@ -408,7 +410,7 @@ def _build_graph_from_chunks(repo_name: str, chunks: list[Any]) -> dict[str, Any
         language: str,
         content: str,
         source_file: str,
-        source_sym_key: str | None,
+        source_sym_keys: list[str] | None,
     ) -> None:
         if not symbol_set:
             return
@@ -419,19 +421,27 @@ def _build_graph_from_chunks(repo_name: str, chunks: list[Any]) -> dict[str, Any
             for def_file in sym_def_files.get(name, ()):
                 target_sym = f"sym:{def_file}:{name}"
                 if target_sym in sym_nodes:
-                    if source_sym_key is not None and target_sym != source_sym_key:
-                        edge_set.add((source_sym_key, target_sym, "uses"))
+                    if source_sym_keys:
+                        for source_sym_key in source_sym_keys:
+                            if source_sym_key != target_sym:
+                                edge_set.add((source_sym_key, target_sym, "uses"))
                     if def_file != source_file:
                         edge_set.add((target_sym, f"file:{source_file}", "used_in"))
 
     for chunk in ast_chunks:
         sym_key = f"sym:{chunk.file_path}:{chunk.symbol}"
-        _add_references(chunk.language, chunk.content, chunk.file_path, sym_key)
+        _add_references(chunk.language, chunk.content, chunk.file_path, [sym_key])
 
     for chunk in chunks:
         if chunk.chunk_source == "ast":
             continue
-        _add_references(chunk.language, chunk.content, chunk.file_path, None)
+        component_keys: list[str] = []
+        if chunk.language in _JS_TS_LANGS:
+            for decl in _js_component_declarations(chunk.language, chunk.content, chunk.start_line):
+                key = f"sym:{chunk.file_path}:{decl['name']}"
+                if key in sym_nodes:
+                    component_keys.append(key)
+        _add_references(chunk.language, chunk.content, chunk.file_path, component_keys or None)
 
     repo_files = {f.file_path for f in chunks}
     for chunk in chunks:

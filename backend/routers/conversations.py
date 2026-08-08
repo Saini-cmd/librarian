@@ -24,6 +24,7 @@ class MessageOut(BaseModel):
     id: str
     role: str
     content: str
+    citations: list[dict] = []
     created_at: datetime
 
 
@@ -103,7 +104,13 @@ def get_conversation(
     return ConversationDetail(
         **_to_out(conv).model_dump(),
         messages=[
-            MessageOut(id=str(m.id), role=m.role, content=m.content, created_at=m.created_at)
+            MessageOut(
+                id=str(m.id),
+                role=m.role,
+                content=m.content,
+                citations=m.citations or [],
+                created_at=m.created_at,
+            )
             for m in conv.messages
         ],
     )

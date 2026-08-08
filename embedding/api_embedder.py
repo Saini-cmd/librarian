@@ -1,5 +1,6 @@
 import logging
 import os
+import time
 from functools import lru_cache
 from typing import List
 
@@ -25,6 +26,14 @@ _MODEL_MAX_TOKENS = 512
 _SAFE_MAX_TOKENS = 505  # leave headroom for special tokens the API may add
 _FALLBACK_MAX_TOKENS = 400  # tiktoken estimate with margin for tokenizer mismatch
 _ENCODING = "cl100k_base"
+
+# OpenRouter's embeddings endpoint rejects input arrays larger than 1024 items
+# ("array_above_max_length"). Batch well under that cap with comfortable token
+# headroom per request (~256 x 505 tokens).
+EMBED_BATCH_SIZE = 256
+EMBED_MAX_RETRIES = 3
+EMBED_RETRY_BASE_DELAY = 1.0
+_RETRYABLE_STATUSES = {429, 500, 502, 503, 504}
 
 
 @lru_cache(maxsize=1)
@@ -76,32 +85,51 @@ class APIEmbedder:
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
         }
+
+        embeddings: List[List[float]] = []
+        for i in range(0, len(truncated), EMBED_BATCH_SIZE):
+            batch = truncated[i : i + EMBED_BATCH_SIZE]
+            embeddings.extend(self._embed_batch(batch, headers))
+        return embeddings
+
+    def _embed_batch(self, batch: List[str], headers: dict) -> List[List[float]]:
         payload = {
             "model": self.model,
-            "input": truncated,
+            "input": batch,
         }
 
-        response = requests.post(
-            OPENROUTER_API_URL,
-            headers=headers,
-            json=payload,
-            timeout=120,
-        )
+        for attempt in range(EMBED_MAX_RETRIES):
+            response = requests.post(
+                OPENROUTER_API_URL,
+                headers=headers,
+                json=payload,
+                timeout=120,
+            )
 
-        if response.status_code != 200:
+            if response.status_code == 200:
+                data = response.json()
+                if "data" not in data:
+                    raise RuntimeError(
+                        f"OpenRouter embedding API unexpected response: {response.text[:500]}"
+                    )
+                items = sorted(data["data"], key=lambda x: x["index"])
+                return [item["embedding"] for item in items]
+
+            if response.status_code in _RETRYABLE_STATUSES and attempt < EMBED_MAX_RETRIES - 1:
+                delay = EMBED_RETRY_BASE_DELAY * (2 ** attempt)
+                logger.warning(
+                    "OpenRouter embedding retry %d/%d after status=%d in %ss",
+                    attempt + 1,
+                    EMBED_MAX_RETRIES,
+                    response.status_code,
+                    delay,
+                )
+                time.sleep(delay)
+                continue
+
             raise RuntimeError(
                 f"OpenRouter embedding API error (status={response.status_code}): {response.text[:500]}"
             )
-
-        data = response.json()
-
-        if "data" not in data:
-            raise RuntimeError(
-                f"OpenRouter embedding API unexpected response: {response.text[:500]}"
-            )
-
-        items = sorted(data["data"], key=lambda x: x["index"])
-        return [item["embedding"] for item in items]
 
     def embed_chunks(self, chunks: List[CodeChunk]) -> List[List[float]]:
         texts = [self._prepare_text(chunk) for chunk in chunks]

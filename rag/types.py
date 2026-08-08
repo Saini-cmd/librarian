@@ -47,6 +47,7 @@ class Citation:
     end_line: int
     symbol: str
     language: str
+    repo: str | None = None
 
 
 @dataclass(frozen=True)

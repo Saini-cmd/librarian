@@ -14,6 +14,7 @@ Answer generation from retrieved code chunks. Builds context, constructs prompts
 - Model: configured via `DEEPSEEK_MODEL` env var (default `deepseek-chat`)
 - Token budget: 14,000 tokens for context
 - Citations include repo, file path, and line numbers
+- Citations are mapped only from `[C1]`-style markers the LLM actually emits (`_map_citations`); no sources are appended when the answer cites nothing
 - Single unified pipeline
 
 ## Work Guidance

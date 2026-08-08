@@ -11,22 +11,22 @@ export default function RepoInput({ onProcess, disabled }) {
   };
 
   return (
-    <form onSubmit={handleSubmit} className="w-full max-w-2xl mx-auto space-y-4">
-      <p className="text-base-content/60 text-xs uppercase tracking-[0.15em] text-center">
+    <form onSubmit={handleSubmit} className="w-full max-w-xl mx-auto space-y-4">
+      <p className="text-base-content/50 text-sm text-center">
         Paste a GitHub repository URL to begin
       </p>
-      <div className="join w-full">
+      <div className="glass-composer rounded-full flex items-center gap-2 pl-5 pr-2 py-2">
         <input
           type="text"
           value={repoLink}
           onChange={(e) => setRepoLink(e.target.value)}
           placeholder="https://github.com/owner/repo"
-          className="input input-bordered join-item w-full font-mono text-sm"
+          className="flex-1 bg-transparent outline-none font-mono text-sm text-base-content placeholder:text-base-content/40"
           disabled={disabled}
         />
         <button
           type="submit"
-          className="btn join-item px-8"
+          className="btn btn-primary rounded-full px-6 shrink-0"
           disabled={disabled || !repoLink.trim()}
         >
           {disabled ? "Processing..." : "Process"}

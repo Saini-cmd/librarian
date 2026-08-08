@@ -91,12 +91,12 @@ export default function SymbolGraphView({ graph, loading, error }) {
       </div>
 
       {selected && (
-        <aside className="w-96 shrink-0 border-l-2 border-base-300 bg-base-200 flex flex-col min-h-0">
-          <div className="p-4 border-b-2 border-base-300 space-y-1">
+        <aside className="w-96 shrink-0 glass-surface border-l border-base-content/10 flex flex-col min-h-0">
+          <div className="p-4 border-b border-base-content/10 space-y-1">
             <div className="font-mono text-[10px] uppercase tracking-widest text-primary">
               {selected.kind}
             </div>
-            <h3 className="font-bold text-sm uppercase truncate">{selected.label}</h3>
+            <h3 className="font-semibold text-sm text-base-content truncate">{selected.label}</h3>
             <div className="font-mono text-[10px] text-base-content/50 truncate">
               {selected.file}
               {selected.start_line
@@ -130,11 +130,11 @@ export default function SymbolGraphView({ graph, loading, error }) {
                     <h4 className="font-mono text-[10px] uppercase tracking-widest text-base-content/40">
                       Entities in this file
                     </h4>
-                    <ul className="space-y-1">
+                    <ul className="flex flex-wrap gap-1.5">
                       {fileEntities.map((n) => (
                         <li
                           key={n.id}
-                          className="font-mono text-xs border-2 border-base-300 px-2 py-1"
+                          className="font-mono text-xs rounded-lg bg-base-content/5 px-2 py-1"
                         >
                           {n.label}{" "}
                           <span className="text-base-content/40">({n.kind})</span>
@@ -149,7 +149,7 @@ export default function SymbolGraphView({ graph, loading, error }) {
                 <h4 className="font-mono text-[10px] uppercase tracking-widest text-base-content/40">
                   Code
                 </h4>
-                <pre className="bg-base-300 border-2 border-base-300 p-3 text-xs font-mono leading-relaxed max-h-72 overflow-y-auto overflow-x-auto">
+                <pre className="bg-base-content/5 rounded-xl border border-base-content/10 p-3 text-xs font-mono leading-relaxed max-h-72 overflow-y-auto overflow-x-auto">
                   <code>{selected.content || "(no code available)"}</code>
                 </pre>
               </section>

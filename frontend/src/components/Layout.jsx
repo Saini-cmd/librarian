@@ -15,19 +15,19 @@ export default function Layout({
     <div className="drawer lg:drawer-open min-h-screen">
       <input id={drawerId} type="checkbox" className="drawer-toggle" />
 
-      <div className="drawer-content flex flex-col min-h-screen overflow-hidden">
+      <div className="drawer-content flex flex-col min-h-screen overflow-hidden bg-base-100">
         <label
           htmlFor={drawerId}
           className="btn btn-ghost drawer-button lg:hidden fixed top-2 left-2 z-50"
         >
           ☰
         </label>
-        <main className="flex-1 flex flex-col">{children}</main>
+        <main className="flex-1 flex flex-col min-h-0">{children}</main>
       </div>
 
       <div className="drawer-side min-h-screen">
         <label htmlFor={drawerId} aria-label="close sidebar" className="drawer-overlay" />
-        <div className="w-72 min-h-screen">
+        <div className="w-72 min-h-screen glass-surface border-r border-base-content/10">
           <Sidebar
             conversations={conversations}
             activeConvId={activeConvId}

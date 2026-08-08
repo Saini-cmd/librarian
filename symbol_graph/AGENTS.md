@@ -14,7 +14,8 @@ Builds a symbol graph for an indexed repo from its AST chunks: nodes for files a
 - Node schema: `{id, label, kind, file, language, start_line, end_line, content?}`; kinds map from `node_type` via `KIND_MAP` (`class`/`interface`/`impl`/`method`/`function`/`entity`/`file`)
 - Content snippet capped at `MAX_SNIPPET_CHARS` (4000) — Qdrant chunk content is the only surviving code (source dir cleaned post-ingest)
 - Edge schema: `{source, target, type}`; types: `defines` (entity → file), `uses` (entity → entity reference), `used_in` (entity → other file whose text references it)
-- Reference detection parses each chunk's code with tree-sitter (`ParserManager`, per-language parser cache) and collects nodes whose type ends in `identifier` (identifier/type_identifier/field_identifier/...); a symbol is linked only when its name appears as an identifier in another chunk's code — comments/strings/docs never count
+- Reference detection parses each chunk's code with tree-sitter (`ParserManager`, per-language parser cache) and collects nodes whose type ends in `identifier` (identifier/type_identifier/field_identifier/...) plus `constant` nodes (Ruby class/module/constant references, a distinct node type in tree-sitter-ruby); a symbol is linked only when its name appears as such a reference in another chunk's code — comments/strings/docs never count
+- `uses` edges are emitted from entity chunks (AST) and from JS/TS synthesized components (their text chunks pass the declared component keys as sources), so arrow-function/function-expression components get real outgoing `uses` edges; non-entity text chunks still emit `used_in` (file-level) edges only
 - Not cached in-process anymore — graphs are persisted to Postgres (`repo_graphs` via `backend/state.py`) by the orchestrator at ingest time; `GET /graph` reads the DB (lazy fallback builds + persists for pre-existing repos)
 - Result shape: `{repo, nodes, edges}`
 
