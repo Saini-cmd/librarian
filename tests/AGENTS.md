@@ -12,6 +12,7 @@ Sequential smoke-test / integration-test scripts for each pipeline stage. Run ma
 - `test_06_wipe_qdrant_db.py` — Delete & recreate Qdrant DB
 - `test_07_answer_generation.py` — End-to-end retrieval + answer generation
 - `test_08_summarization.py` — Per-file LLM summarization pipeline
+- `test_09_memory.py` — Chat memory: `conversation_summaries` table, short-term assembly, long-term store round-trip (fake embedder — no API)
 - `bootstrap.py` — Path setup utility
 
 ## Local Contracts

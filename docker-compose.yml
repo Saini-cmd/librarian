@@ -22,6 +22,15 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
+  redis:
+    image: redis:7
+    container_name: librarian-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
   # Browser GUI for Postgres — opt-in via `docker compose --profile tools up -d`
   adminer:
     image: adminer:latest
@@ -36,3 +45,4 @@ services:
 volumes:
   qdrant_storage:
   postgres_data:
+  redis_data:

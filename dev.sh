@@ -19,9 +19,11 @@ dk() { "$@"; }  # default docker runner; may be overridden below
 if [[ -t 1 ]]; then
   B_PREFIX=$'\e[36m[backend]\e[0m '
   F_PREFIX=$'\e[35m[frontend]\e[0m '
+  W_PREFIX=$'\e[33m[worker]\e[0m '
 else
   B_PREFIX='[backend] '
   F_PREFIX='[frontend] '
+  W_PREFIX='[worker] '
 fi
 
 fail() { echo "dev.sh: error: $*" >&2; exit 1; }
@@ -65,7 +67,7 @@ test -d "${ROOT_DIR}/frontend/node_modules" || fail "frontend/node_modules missi
 
 # --- 1. infra (Docker) ---
 
-echo "dev.sh: starting infra (qdrant + postgres)..."
+echo "dev.sh: starting infra (qdrant + postgres + redis)..."
 dk docker compose up -d
 
 echo "dev.sh: waiting for qdrant on :6333 ..."
@@ -86,6 +88,20 @@ except Exception:
     sys.exit(1)
 " 2>/dev/null && break
   [[ "${i}" == "30" ]] && fail "postgres did not become ready in time"
+  sleep 1
+done
+
+echo "dev.sh: waiting for redis on :6379 ..."
+for i in $(seq 1 30); do
+  venv/bin/python -c "
+import redis, sys
+try:
+    redis.Redis(host='localhost', port=6379, db=0, socket_timeout=2).ping()
+    sys.exit(0)
+except Exception:
+    sys.exit(1)
+" 2>/dev/null && break
+  [[ "${i}" == "30" ]] && fail "redis did not become ready in time"
   sleep 1
 done
 
@@ -116,7 +132,20 @@ echo "dev.sh: starting frontend (vite) on :5173 ..."
 FRONTEND_PID=$!
 PROCS+=("${FRONTEND_PID}")
 
-echo "dev.sh: stack up — backend :8000, frontend (vite, auto-port), docker infra. Ctrl+C to stop everything."
+# --- 3b. chat-memory ARQ worker (background jobs: vectorize exchanges + session summaries) ---
+
+echo "dev.sh: starting chat-memory worker (arq) ..."
+(
+  set -o pipefail
+  {
+    source "${ROOT_DIR}/venv/bin/activate"
+    exec venv/bin/arq memory.worker.WorkerSettings
+  } 2>&1 | sed -u "s/^/${W_PREFIX}/"
+) &
+WORKER_PID=$!
+PROCS+=("${WORKER_PID}")
+
+echo "dev.sh: stack up — backend :8000, frontend (vite, auto-port), arq worker, docker infra. Ctrl+C to stop everything."
 
 # brief wait so the backend has a chance to boot before we report status
 for i in $(seq 1 20); do
@@ -126,9 +155,9 @@ done
 curl -sf --max-time 2 http://localhost:8000/api/health >/dev/null 2>&1 \
   || echo "dev.sh: warning: backend not healthy yet (will retry via its own reload)."
 
-# --- wait for either process to exit (crash => teardown; Ctrl+C => INT trap) ---
+# --- wait for any process to exit (crash => teardown; Ctrl+C => INT trap) ---
 # NOTE: use a liveness poll, not `wait -n` — bash defers signal traps while
 # blocked in `wait`, which would hang the stack on Ctrl+C.
-while kill -0 "${BACKEND_PID}" 2>/dev/null && kill -0 "${FRONTEND_PID}" 2>/dev/null; do
+while kill -0 "${BACKEND_PID}" 2>/dev/null && kill -0 "${FRONTEND_PID}" 2>/dev/null && kill -0 "${WORKER_PID}" 2>/dev/null; do
   sleep 1
 done

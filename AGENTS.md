@@ -87,17 +87,25 @@ When the user requests a durable behavior change, record it here or in the relev
 
 All commands run from the repository root. The app has three layers: infra (Docker), backend (uvicorn), frontend (Vite).
 
-### 1. Infra — Qdrant + PostgreSQL (Docker)
+### 1. Infra — Qdrant + PostgreSQL + Redis (Docker)
 
 ```bash
-docker compose up -d     # start qdrant (6333) + postgres (5432) in background
-docker compose ps        # check status
-docker compose down      # stop containers (data volumes preserved)
-docker compose down -v   # stop AND wipe all data (Postgres + Qdrant volumes)
+docker compose up -d                 # start ALL infra (qdrant :6333 + postgres :5432 + redis :6379) in background
+docker compose up -d qdrant          # start only qdrant
+docker compose up -d postgres        # start only postgres
+docker compose up -d redis           # start only redis (needed for the chat-memory worker, §2b)
+docker compose ps                    # check status
+docker compose stop redis            # stop redis (worker loses its queue; chat degrades to no-memory)
+docker compose down                  # stop all containers (data volumes preserved)
+docker compose down -v               # stop AND wipe all data (Postgres + Qdrant + Redis volumes)
 ```
 
 - Containers auto-start on boot (`restart: unless-stopped`)
-- If `docker` gives permission denied, run `sg docker -c "<command>"` or re-login after the group change
+- If `docker` gives permission denied, run `sg docker -c "<command>"` or re-login after the docker group change
+- **Verify each service**:
+  - Qdrant: `curl http://localhost:6333/collections` or browse `http://localhost:6333/dashboard`
+  - Postgres: `docker compose exec postgres psql -U librarian -c 'select 1;'`
+  - Redis: `docker compose exec redis redis-cli ping` → expect `PONG`
 
 ### 2. Backend — FastAPI
 
@@ -108,6 +116,16 @@ venv/bin/uvicorn backend.main:app --host 0.0.0.0 --port 8000             # prod-
 
 - Requires infra up (Postgres + Qdrant) — tables auto-create on startup
 - Stop with `Ctrl+C` (or `kill <pid>`)
+
+### 2b. Background worker — ARQ (chat memory)
+
+```bash
+venv/bin/arq memory.worker.WorkerSettings   # chat-memory jobs: vectorize exchanges + rolling session summaries
+```
+
+- **Requires Redis up** (`docker compose up -d redis`; verify with `docker compose exec redis redis-cli ping`). Chat endpoints still work if the worker/Redis is down — they degrade to no-memory, never break chat
+- Start it in a separate terminal from the backend (or use `./dev.sh`, which starts it automatically)
+- Stop with `Ctrl+C`
 
 ### 3. Frontend — React/Vite
 
@@ -138,7 +156,7 @@ open http://localhost:8080             # Adminer — Postgres GUI (opt-in, tools
 KEEP_INFRA=1 ./dev.sh          # same, but leaves Docker containers running on exit
 ```
 
-- `dev.sh` waits for Qdrant + Postgres to be healthy before starting the backend, keeps hot reload (uvicorn `--reload`, Vite HMR), and tears down all processes + runs `docker compose down` on exit
+- `dev.sh` waits for Qdrant + Postgres + Redis to be healthy before starting the backend, keeps hot reload (uvicorn `--reload`, Vite HMR), **starts the chat-memory ARQ worker (§2b)**, and tears down all processes + runs `docker compose down` on exit
 - Auto-falls back to `sg docker -c` if your session lacks the `docker` group
 
 ### Reset app data (keep infra running)
@@ -153,15 +171,16 @@ curl -X POST http://localhost:8000/api/reset   # wipes Qdrant collection + index
 
 | Path | Purpose |
 |---|---|
-| `backend/` | FastAPI server — REST API for repo ingestion, chat, users, conversations, repos, and **sync/diff**; repo identity = normalized `repo_url` + per-commit `repo_hash`; PostgreSQL-backed state (sync SQLAlchemy, 7 tables; schema in `DB_SCHEMA.md`) |
+| `backend/` | FastAPI server — REST API for repo ingestion, chat, users, conversations, repos, and **sync/diff**; repo identity = normalized `repo_url` + per-commit `repo_hash`; PostgreSQL-backed state (sync SQLAlchemy, 8 tables; schema in `DB_SCHEMA.md`) |
 | `chunking/` | Semantic code chunking (AST + text) — no pickle, no summaries |
 | `embedding/` | Embedding pipeline — vectorize chunks via OpenRouter API and upsert to Qdrant |
 | `frontend/` | React 18 SPA — daisyUI 5 + Tailwind CSS 4, brutalist dark theme, router-based pages (Landing, App, Settings), Axios API client with Clerk auth |
 | `ingestion/` | Git clone (shallow, depth=1) + file scanning for downstream chunking |
+| `memory/` | Chat memory — short-term history assembly (`short_term.py`) + long-term Qdrant `long_term_memory` store (`store.py`) + ARQ background worker (`worker.py`) |
 | `orchestration/` | Pipeline orchestrator — clone → scan → **summarize ∥ (chunk → embed)** → graph → cleanup |
 | `rag/` | Answer generation — context building, prompt construction, LLM (DeepSeek via ChatOpenAI) |
 | `reranking/` | Reranking via OpenRouter API (cohere/rerank-4-fast) |
-| `summarization/` | Per-file LLM summarization (DeepSeek via ChatOpenAI) stored in PostgreSQL |
+| `summarization/` | Per-file LLM summarization (OpenRouter `ling-3.0-flash` via shared `SUMMARIZE_*` config) stored in PostgreSQL; shared with chat-memory rolling summaries |
 | `symbol_graph/` | Symbol graph builder — entity/file nodes + usage edges from Qdrant AST chunks (serves the frontend Graph view) |
 | `retrieval/` | Hybrid retrieval — dense vector + BM25 + RRF + rerank |
 | `tests/` | Smoke-test scripts for each pipeline stage |
@@ -176,9 +195,11 @@ curl -X POST http://localhost:8000/api/reset   # wipes Qdrant collection + index
 | `venv/` | Python virtual environment (not tracked) |
 | `.env` | Backend env file — all backend secrets/config (model APIs, infra, Clerk). Not tracked; loaded via `load_dotenv()` from the repo root. Schema documented in `.env.example` |
 | `frontend/.env` | Frontend env file — `VITE_*` vars for Vite (e.g. `VITE_CLERK_PUBLISHABLE_KEY`); not tracked, read by Vite from the frontend dir |
-| `DB_SCHEMA.md` | Working reference for the Postgres data model (7 tables) — not durable code |
-| `TODO.md` | Task tracker — remaining sync-feature work + side tasks (replaces the removed `PLAN.md`); schema/identity reference lives in `DB_SCHEMA.md` |
+| `DB_SCHEMA.md` | Working reference for the Postgres data model (8 tables) — not durable code |
+| `TODO.md` | Task tracker — remaining sync-feature work + side tasks; schema/identity reference lives in `DB_SCHEMA.md` |
+| `PLAN.md` | Working implementation plan for symbol-graph correctness across all languages (phases + decisions); not durable code |
 | `dev.sh` | Dev startup script — convenience only |
+| `START_STOP.md` | Plain-language manual start/stop command sequence + GUI tool info — convenience only |
 | `.agents/` | Agent skills and configurations (installed by `npx skills`) |
 
 ### Root-Owned Durable Config

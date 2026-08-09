@@ -34,6 +34,8 @@ from backend.state import (
     write_citations,
 )
 from ingestion.github_api_fetcher import GitHubAPIFetcher
+from memory.short_term import build_memory_context
+from memory.worker import enqueue_memory_jobs
 from orchestration.orchestrator import Orchestrator
 from rag.answer_generator import AnswerGenerator
 from rag.context_builder import ContextBuilder
@@ -222,7 +224,7 @@ def chat(
     user = upsert_user(db, clerk_id)
 
     conv_id = _parse_conversation_id(payload.conversation_id)
-    repo_hash, repo_name = resolve_conversation_repo(
+    repo_hash, repo_name, repo_url = resolve_conversation_repo(
         db, user.clerk_id, conv_id, payload.repo_hash
     )
     conversation = get_or_create_conversation(
@@ -232,13 +234,21 @@ def chat(
         repo_name=repo_name,
         repo_hash=repo_hash,
     )
-    add_message(db, conversation.id, "user", payload.message, repo_hash=repo_hash)
+    history, memory_texts = build_memory_context(
+        db, conversation.id, user.clerk_id, repo_url, payload.message
+    )
+    user_msg = add_message(db, conversation.id, "user", payload.message, repo_hash=repo_hash)
 
     retriever = get_retrieval_pipeline()
     retrieved = retriever.retrieve(payload.message, repo_hash=repo_hash)
 
     result = get_answer_generator().generate(
-        query=payload.message, retrieved_chunks=retrieved, stream=True, repo_hash=repo_hash
+        query=payload.message,
+        retrieved_chunks=retrieved,
+        stream=True,
+        repo_hash=repo_hash,
+        history=history.messages,
+        memory_texts=memory_texts,
     )
     msg = add_message(
         db,
@@ -249,6 +259,9 @@ def chat(
         repo_hash=repo_hash,
     )
     write_citations(db, msg.id, [asdict(c) for c in result.citations])
+    enqueue_memory_jobs(
+        conversation.id, user_msg.id, msg.id, user.clerk_id, repo_url, repo_hash
+    )
 
     return ChatResponse(answer=result.answer, citations=[asdict(c) for c in result.citations])
 
@@ -259,7 +272,7 @@ def chat_stream(payload: ChatRequest, clerk_id: str = Depends(get_current_user))
     user = upsert_user(db, clerk_id)
 
     conv_id = _parse_conversation_id(payload.conversation_id)
-    repo_hash, repo_name = resolve_conversation_repo(
+    repo_hash, repo_name, repo_url = resolve_conversation_repo(
         db, user.clerk_id, conv_id, payload.repo_hash
     )
     conversation = get_or_create_conversation(
@@ -269,7 +282,10 @@ def chat_stream(payload: ChatRequest, clerk_id: str = Depends(get_current_user))
         repo_name=repo_name,
         repo_hash=repo_hash,
     )
-    add_message(db, conversation.id, "user", payload.message, repo_hash=repo_hash)
+    history, memory_texts = build_memory_context(
+        db, conversation.id, user.clerk_id, repo_url, payload.message
+    )
+    user_msg = add_message(db, conversation.id, "user", payload.message, repo_hash=repo_hash)
 
     retriever = get_retrieval_pipeline()
     retrieved = retriever.retrieve(payload.message, repo_hash=repo_hash)
@@ -279,7 +295,13 @@ def chat_stream(payload: ChatRequest, clerk_id: str = Depends(get_current_user))
     llm_client = LLMClient()
 
     context = context_builder.build(retrieved)
-    prompt_payload = prompt_builder.build(query=payload.message, context=context, repo_hash=repo_hash)
+    prompt_payload = prompt_builder.build(
+        query=payload.message,
+        context=context,
+        repo_hash=repo_hash,
+        history=history.messages,
+        memory_texts=memory_texts,
+    )
 
     def event_stream():
         full_answer: list[str] = []
@@ -301,6 +323,9 @@ def chat_stream(payload: ChatRequest, clerk_id: str = Depends(get_current_user))
                 repo_hash=repo_hash,
             )
             write_citations(db, msg.id, [asdict(c) for c in citations])
+            enqueue_memory_jobs(
+                conversation.id, user_msg.id, msg.id, user.clerk_id, repo_url, repo_hash
+            )
             yield f"data: {json.dumps({'citations': [asdict(c) for c in citations]})}\n\n"
         finally:
             db.close()

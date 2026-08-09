@@ -2,15 +2,15 @@
 
 Working reference doc for the new Postgres data model. Details are being defined table-by-table; this file is the shared source of truth during the redesign.
 
-- **Status**: complete (7 tables defined) — see Relationships summary + Migration notes below
-- **Scope**: 7 required Postgres tables (replacing the current 8-table model in `backend/models.py`)
+- **Status**: complete (8 tables defined) — see Relationships summary + Migration notes below
+- **Scope**: 8 required Postgres tables in `backend/models.py`
 - **Related**: `backend/models.py`, `backend/state.py`, `backend/database.py`, `.env.example`
 
 ---
 
 ## Decisions (confirmed)
 
-1. **Repo identity = normalized `repo_url` + per-commit `repo_hash`**; `repo_name` is display-only (derived from the URL), never used for lookups/scoping. Qdrant chunks carry `repo_url` (display) and `repo_hash` in their payload. **Qdrant scoping is hash-only**: every read (retrieval, BM25, symbol graph) filters by `repo_hash` alone — it is globally unique, so retained old-commit chunks never leak into a newer commit's results and no repo dimension is needed. No table changes result from this (7 tables stay).
+1. **Repo identity = normalized `repo_url` + per-commit `repo_hash`**; `repo_name` is display-only (derived from the URL), never used for lookups/scoping. Qdrant chunks carry `repo_url` (display) and `repo_hash` in their payload. **Qdrant scoping is hash-only**: every read (retrieval, BM25, symbol graph) filters by `repo_hash` alone — it is globally unique, so retained old-commit chunks never leak into a newer commit's results and no repo dimension is needed. No table changes result from this (8 tables stay).
 2. **User ↔ repo linkage**: no join table. A user's repos are derived from their `conversations.repo_hash`.
 3. **Ingestion progress**: the frontend poll is being replaced (streaming/SSE), so `pipeline_state` is not re-created. `indexed_repo.status` holds coarse state.
 4. **Old-commit cleanup**: after a successful sync, old commits are soft-deleted via `indexed_repo.status = 'deleted'`. Only the commit's **cited chunks** (those referenced by a `citation` row) are retained in Qdrant; all other chunks are deleted via `VectorIndexer.delete_by_repo_hash`. `file_summary` + `repo_graph` for the tombstoned commit are deleted. `latest_indexed_repo_by_name` and `list_user_repos` skip `status='deleted'`.
@@ -168,13 +168,32 @@ Indexes: `chunk_id`, `repo_hash`, `message_id`.
 
 ---
 
+## Table 8 — `conversation_summaries`
+
+**Purpose**: Rolling per-conversation summary for **short-term memory** (chat memory feature). Maintained by the background ARQ summarizer (`memory/worker.py`); `last_message_id` is the watermark — the summarizer merges messages created after it into `summary_content`.
+
+**Design notes**:
+- `conversation_id` is a **foreign key** → `conversations.id` ON DELETE CASCADE, **unique** (one summary per conversation).
+- `last_message_id` is a plain UUID watermark (no FK) — the summarizer resumes from it.
+- Read path: when a conversation's raw history exceeds the token budget, the stored summary replaces the older turns (see `memory/short_term.py`).
+
+| Column | Type (proposed) | Null | Default | Notes |
+|---|---|---|---|---|
+| `id` | uuid | no | uuid4 | Primary key |
+| `conversation_id` | uuid | no | — | **FK → `conversations.id`** ON DELETE CASCADE, **unique** |
+| `summary_content` | text | no | — | Rolling recap of the conversation so far |
+| `total_tokens_covered` | int | no | 0 | Tokens summarized so far |
+| `last_message_id` | uuid | yes | — | Watermark — resume point for the summarizer |
+| `updated_at` | timestamptz | no | now() | Last summary update |
+
 ## Relationships summary
 
 ```
 users (id PK; clerk_id UNIQUE)
   ├── conversations.clerk_id  → users.clerk_id
-  │     └── messages.conversation_id → conversations.id
-  │           └── citation.message_id → messages.id        (durable citations; drives retention)
+  │     ├── messages.conversation_id → conversations.id
+  │     │     └── citation.message_id → messages.id        (durable citations; drives retention)
+  │     └── conversation_summaries.conversation_id → conversations.id   (rolling short-term memory)
   │
 indexed_repo (id PK; repo_hash UNIQUE)   ← "same repo, different hashes"
   ├── file_summary.repo_hash  → indexed_repo.repo_hash   (per-commit file summaries)
@@ -196,3 +215,4 @@ indexed_repo (id PK; repo_hash UNIQUE)   ← "same repo, different hashes"
 | `pipeline_state` | dropped | — |
 | `qa_records` | dropped | — |
 | — | `citation` | new — durable per-message citations for retention/cleanup |
+| — | `conversation_summaries` | new — rolling short-term memory summary (chat-memory feature) |

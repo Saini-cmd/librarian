@@ -1,22 +1,22 @@
 # backend/
 
 ## Purpose
-FastAPI server providing REST API for repo ingestion, chat, users, conversations, and repositories. Durable state is stored in local PostgreSQL (sync SQLAlchemy) across **7 tables** keyed per-commit by `repo_hash`; vectors live in local Qdrant (Docker). Delegates pipeline orchestration to `orchestration/` and RAG to `rag/`. Schema reference: `DB_SCHEMA.md`.
+FastAPI server providing REST API for repo ingestion, chat, users, conversations, and repositories. Durable state is stored in local PostgreSQL (sync SQLAlchemy) across **8 tables** keyed per-commit by `repo_hash`; vectors live in local Qdrant (Docker). Delegates pipeline orchestration to `orchestration/` and RAG to `rag/`. Schema reference: `DB_SCHEMA.md`.
 
 ## Ownership
 - `main.py` — FastAPI app: CORS, lifespan (`init_db`), mounts routers, core endpoints (process, chat, chat/stream, status, reset, health); persists the ingested repo's symbol graph and the `indexed_repo` row after `/api/process`
 - `auth.py` — Clerk JWT verification (RS256, JWKS), `get_current_user` dependency
-- `state.py` — DB data-access helpers: users, indexed repos, user-repo derivation, conversations, messages, repo graphs, reset
+- `state.py` — DB data-access helpers: users, indexed repos, user-repo derivation, conversations, messages, repo graphs, rolling conversation summaries (`list_recent_messages`, `load/save_conversation_summary`), reset
 - `database.py` — Sync SQLAlchemy engine (`DATABASE_URL`), `SessionLocal`, `Base`, `get_db`, `init_db` (create_all on startup)
-- `models.py` — ORM models (7 tables): `User`, `IndexedRepo`, `FileSummary`, `RepoGraph`, `Conversation`, `Message`, `Citation`
+- `models.py` — ORM models (8 tables): `User`, `IndexedRepo`, `FileSummary`, `RepoGraph`, `Conversation`, `Message`, `Citation`, `ConversationSummary`
 - `routers/users.py` — `GET/PATCH /api/users/me` with lazy Clerk user upsert (`name` field)
-- `routers/conversations.py` — Conversation CRUD + nested messages (owned by `clerk_id`, point at a `repo_hash`)
+- `routers/conversations.py` — Conversation CRUD + nested messages (owned by `clerk_id`, point at a `repo_hash`); delete also purges the conversation's long-term memory points (`get_memory_store().delete_by_conversation`, best-effort)
 - `routers/repositories.py` — `GET /api/repositories` (user's repos derived from conversations), repo-scoped graph/summary/chunks (keyed by `repo_hash`), `updates` probe, and `sync` (the diff/sync feature)
 
 ## Local Contracts
 - All API paths prefixed with `/api` (proxied by Vite dev server)
 - Clerk JWT required on protected routes (`Depends(get_current_user)`); 401 on invalid/missing
-- DB: sync SQLAlchemy + psycopg2; **7 tables**: `users`, `indexed_repo`, `file_summary`, `repo_graph`, `conversations`, `messages`, `citation`. New tables auto-create via `create_all` (Alembic deferred); changes to existing tables need a manual drop/recreate (no migration tooling)
+- DB: sync SQLAlchemy + psycopg2; **8 tables**: `users`, `indexed_repo`, `file_summary`, `repo_graph`, `conversations`, `messages`, `citation`, `conversation_summaries`. New tables auto-create via `create_all` (Alembic deferred); changes to existing tables need a manual drop/recreate (no migration tooling)
 - **Identity = `repo_url` + `repo_hash`**: `repo_url` (canonicalized by `normalize_repo_url`) is the repo-level identity; `repo_hash` (git HEAD SHA) is the globally-unique commit identity. `repo_name` is display-only (derived from the URL), never used for lookups/scoping. Qdrant scoping is **hash-only** (`repo_hash` payload filter) — the `repo`/URL name filter was removed everywhere
 - **Per-commit identity**: `indexed_repo.repo_hash` (git HEAD SHA) is the unique key; the same repo at different commits = separate rows. `conversations.repo_hash`, `file_summary.repo_hash`, `repo_graph.repo_hash` all FK to it
 - **A user's repos are derived from their conversations** (distinct `repo_url`s, one row per repo = most recently active commit; no user↔repo join table). `user_repo_exists(clerk_id, repo_url)` checks ownership by URL
@@ -24,18 +24,19 @@ FastAPI server providing REST API for repo ingestion, chat, users, conversations
 - **Summaries and graphs are keyed by `repo_hash`** — `file_summary` and `repo_graph` FK to `indexed_repo.repo_hash`. Qdrant chunks carry `repo_url` + `repo_hash` in their payload
 - **Durable citations**: each `[C1]` marker is written to the `citation` table (`write_citations`) keyed by `message_id` + `repo_hash` + `chunk_id` — this is what retains a chunk during old-commit cleanup. The UI-facing snapshot stays on `Message.citation` (JSON, no snippet). `cited_chunk_ids(repo_hash)` returns the retained chunk ids
 - Chat is repo-aware: `/api/chat` and `/api/chat/stream` accept optional `repo_hash`; `resolve_conversation_repo` returns `(repo_hash, repo_name)` with precedence conversation > requested hash > none; retrieval scopes by `repo_hash` only, summaries load by `repo_hash`
+- **Chat memory**: `/api/chat`/`/api/chat/stream` assemble short-term history (last-N turns, rolling `conversation_summaries` fallback) + long-term memory (`long_term_memory` Qdrant collection, per `clerk_id`+`repo_url`, current conversation excluded) via `memory.short_term.build_memory_context`, and inject both into the prompt (history before the current user message is appended). Long-term memory is scoped by `repo_url` (stable across commits) so it survives a sync. After the assistant message persists, `enqueue_memory_jobs` (background vectorization + deferred summary rollup) fires — the ARQ worker (`memory.worker.WorkerSettings`, runbook §2b) processes the jobs; Redis down degrades to no-memory
 - Assistant `Message` rows carry a `citation` JSON map (one entry per cited chunk). Citations store `repo_hash`, `chunk_id`, `file_path`, lines, `symbol`, `language` — the `citation` table rows are the durable record
 - **Messages are stamped with `repo_hash`** (the commit they were sent/answered against, via `add_message(..., repo_hash=...)`). After a sync re-points a conversation to the new commit, pre-sync messages keep their old hash — the frontend renders a sync-boundary divider where consecutive messages differ in `repo_hash`
 - `indexed_repo.status` values: `pending` | `indexing` | `indexed` | `syncing` | `failed` | `deleted`. Soft-deleted (`deleted`) commits are hidden from `latest_indexed_repo_by_url` and `list_user_repos`; their non-cited chunks are purged via `VectorIndexer.delete_by_repo_hash` / `delete_points_by_repo_hash` (cited chunks retained)
 - **Sync** (`POST /api/repositories/{repo_hash}/sync`): probes the remote HEAD; if changed, re-ingests (or reuses an already-indexed newer commit via global hash lookup), re-points the **caller's** conversations for that repo to the new hash, then tombstones (`status='deleted'`) each old commit with zero remaining conversations (any user), deleting its non-cited chunks + `file_summary` + `repo_graph` rows. Old commits stay live and chat on them keeps working until a sync re-points/tombstones. `GET /api/repositories/{repo_hash}/updates` is the cheap change probe (`updates_available` + `remote_hash`)
 - **No `pipeline_state` / `qa_records` tables** — `GET /api/status` derives `phase`/`ready`/`indexed_repo_name` from the caller's repos; the frontend no longer polls it (process + sync stream progress via SSE)
-- `reset` detaches conversations from repos (`repo_hash = NULL`), then wipes Qdrant collection + `citation` + `repo_graph` + `indexed_repo` (cascades `file_summary`); keeps `users` and chat history
+- `reset` detaches conversations from repos (`repo_hash = NULL`), then wipes both Qdrant collections (`code_chunks` + `long_term_memory`) + `citation` + `repo_graph` + `indexed_repo` (cascades `file_summary`); keeps `users` and chat history
 - Endpoints:
   - `GET /api/health` — health check (no auth)
   - `GET /api/status` — derived repo state + Qdrant collection status (auth optional)
   - `POST /api/reset` — wipe Qdrant + index data (no auth — should be protected)
   - `POST /api/process` — probe remote HEAD; skip-to-chat if the hash is already indexed (global), else ingest; **streams SSE progress** (`progress` → `result`/`error` events), returns `conversation_id` + `repo_hash` in the final result event (auth required)
-  - `POST /api/chat` / `/api/chat/stream` — query → retrieve → generate, persists messages (auth required)
+  - `POST /api/chat` / `/api/chat/stream` — query → retrieve → generate, persists messages (auth required). **Chat memory read path**: both endpoints assemble short-term history + long-term memory via `memory.short_term.build_memory_context` (zero-LLM; memory excludes the current conversation) and thread it into the prompt; after the assistant message is persisted they fire-and-forget `enqueue_memory_jobs` (Redis down degrades to no-memory, never breaks chat)
   - `GET /api/repositories` — one `RepoOut` per repo (latest active commit), including `repo_hash`
   - `GET /api/repositories/{repo_hash}/graph` — symbol graph for that commit (auth, ownership via `repo_url`; lazy build fallback)
   - `GET /api/repositories/{repo_hash}/summary?file_path=` — stored per-file summary (auth, ownership checked)

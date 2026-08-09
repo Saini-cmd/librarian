@@ -109,6 +109,11 @@ class Conversation(Base):
         cascade="all, delete-orphan",
         order_by="Message.created_at",
     )
+    summary: Mapped["ConversationSummary | None"] = relationship(
+        back_populates="conversation",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
 
 
 class Message(Base):
@@ -153,3 +158,26 @@ class Citation(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
     message: Mapped["Message"] = relationship(back_populates="citations")
+
+
+class ConversationSummary(Base):
+    """Rolling per-conversation summary, maintained by the background summarizer.
+
+    `last_message_id` is the watermark: the summarizer merges messages created
+    after it into `summary_content`. One row per conversation.
+    """
+
+    __tablename__ = "conversation_summaries"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    conversation_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("conversations.id", ondelete="CASCADE"), unique=True, index=True
+    )
+    summary_content: Mapped[str] = mapped_column(Text)
+    total_tokens_covered: Mapped[int] = mapped_column(Integer, default=0)
+    last_message_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow
+    )
+
+    conversation: Mapped["Conversation"] = relationship(back_populates="summary")

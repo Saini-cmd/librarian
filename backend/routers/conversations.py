@@ -14,6 +14,7 @@ from backend.state import (
     normalize_repo_url,
     upsert_user,
 )
+from memory.store import get_memory_store
 
 
 router = APIRouter(prefix="/api/conversations", tags=["conversations"])
@@ -137,5 +138,11 @@ def delete_conversation(
 ) -> None:
     user = upsert_user(db, clerk_id)
     conv = _require_owned(db, user.clerk_id, conversation_id)
-    db.delete(conv)
+    db.delete(conv)  # cascades messages + citation + conversation_summaries
     db.commit()
+    # Purge long-term memory points for this conversation (best-effort — Qdrant down
+    # must not block the deletion).
+    try:
+        get_memory_store().delete_by_conversation(conversation_id)
+    except Exception:
+        pass

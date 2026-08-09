@@ -2,17 +2,20 @@ from datetime import datetime
 from typing import Any
 from urllib.parse import urlparse
 
+from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 
 from backend.database import SessionLocal
 from backend.models import (
     Citation,
     Conversation,
+    ConversationSummary,
     IndexedRepo,
     Message,
     RepoGraph,
     User,
 )
+from memory.store import COLLECTION_NAME as MEMORY_COLLECTION_NAME
 from vector_store.qdrant_client import QdrantManager
 
 
@@ -218,8 +221,8 @@ def resolve_conversation_repo(
     clerk_id: str,
     conversation_id: Any,
     requested_repo_hash: str | None = None,
-) -> tuple[str | None, str | None]:
-    """Resolve (repo_hash, repo_name) a chat should search over.
+) -> tuple[str | None, str | None, str | None]:
+    """Resolve (repo_hash, repo_name, repo_url) a chat should search over.
 
     Precedence: the conversation's stored repo > the repo the client requested
     (by its commit hash) > None.
@@ -227,12 +230,16 @@ def resolve_conversation_repo(
     if conversation_id is not None:
         conv = db.get(Conversation, conversation_id)
         if conv is not None and conv.clerk_id == clerk_id and conv.indexed_repo is not None:
-            return conv.repo_hash, conv.indexed_repo.repo_name
+            return (
+                conv.repo_hash,
+                conv.indexed_repo.repo_name,
+                conv.indexed_repo.repo_url,
+            )
     if requested_repo_hash:
         repo = indexed_repo_by_hash(db, requested_repo_hash)
         if repo is not None and repo.status != "deleted":
-            return repo.repo_hash, repo.repo_name
-    return None, None
+            return repo.repo_hash, repo.repo_name, repo.repo_url
+    return None, None, None
 
 
 def get_or_create_conversation(
@@ -277,6 +284,87 @@ def add_message(
     db.commit()
     db.refresh(msg)
     return msg
+
+
+def list_recent_messages(db: Session, conversation_id: Any, limit: int = 10) -> list[Message]:
+    """The `limit` most recent messages of a conversation, oldest first."""
+    rows = (
+        db.query(Message)
+        .filter(Message.conversation_id == conversation_id)
+        .order_by(Message.created_at.desc(), Message.id.desc())
+        .limit(limit)
+        .all()
+    )
+    rows.reverse()
+    return rows
+
+
+def messages_since(
+    db: Session,
+    conversation_id: Any,
+    after_message_id: Any = None,
+    limit: int = 200,
+) -> list[Message]:
+    """Messages of a conversation strictly after `after_message_id`, oldest first.
+
+    Orders by `(created_at, id)` so the watermark is a stable resume point even
+    when messages share a timestamp. `after_message_id=None` returns all messages.
+    """
+    query = db.query(Message).filter(Message.conversation_id == conversation_id)
+    if after_message_id is not None:
+        anchor = db.get(Message, after_message_id)
+        if anchor is not None:
+            query = query.filter(
+                or_(
+                    Message.created_at > anchor.created_at,
+                    and_(
+                        Message.created_at == anchor.created_at,
+                        Message.id > anchor.id,
+                    ),
+                )
+            )
+    return (
+        query.order_by(Message.created_at.asc(), Message.id.asc()).limit(limit).all()
+    )
+
+
+# ---- Conversation summaries (rolling memory) ----
+
+
+def load_conversation_summary(
+    db: Session, conversation_id: Any
+) -> ConversationSummary | None:
+    return (
+        db.query(ConversationSummary)
+        .filter(ConversationSummary.conversation_id == conversation_id)
+        .first()
+    )
+
+
+def save_conversation_summary(
+    db: Session,
+    conversation_id: Any,
+    summary_content: str,
+    total_tokens_covered: int = 0,
+    last_message_id: Any = None,
+) -> ConversationSummary:
+    """Create or merge the rolling summary row for a conversation."""
+    row = load_conversation_summary(db, conversation_id)
+    if row is None:
+        row = ConversationSummary(
+            conversation_id=conversation_id,
+            summary_content=summary_content,
+            total_tokens_covered=total_tokens_covered,
+            last_message_id=last_message_id,
+        )
+        db.add(row)
+    else:
+        row.summary_content = summary_content
+        row.total_tokens_covered = total_tokens_covered
+        row.last_message_id = last_message_id
+    db.commit()
+    db.refresh(row)
+    return row
 
 
 def write_citations(db: Session, message_id: Any, citations: list[dict]) -> int:
@@ -338,11 +426,12 @@ def delete_all_repo_graphs(db: Session) -> None:
 
 def reset_index_state(db: Session, wipe: bool = True) -> None:
     if wipe:
-        try:
-            if collection_exists(COLLECTION_NAME):
-                QdrantManager().get_client().delete_collection(COLLECTION_NAME)
-        except Exception:
-            pass
+        for name in (COLLECTION_NAME, MEMORY_COLLECTION_NAME):
+            try:
+                if collection_exists(name):
+                    QdrantManager().get_client().delete_collection(name)
+            except Exception:
+                pass
 
     # Detach conversations from repos (keep chat history), then wipe repo-scoped data.
     db.query(Conversation).update({Conversation.repo_hash: None})

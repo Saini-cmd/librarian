@@ -1,7 +1,7 @@
 import tiktoken
 
 from rag.llm_client import LLMClient
-from rag.types import LLMConfig
+from summarization.llm_config import build_summarizer_config
 
 
 _ENCODING = "cl100k_base"
@@ -18,8 +18,7 @@ _SUMMARIZATION_SYSTEM_PROMPT = (
 class FileSummarizer:
 
     def __init__(self):
-        config = LLMConfig(temperature=0.1, max_tokens=256)
-        self._client = LLMClient(config)
+        self._client = LLMClient(build_summarizer_config())
         self._tokenizer = tiktoken.get_encoding(_ENCODING)
 
     def summarize_file(self, file_path: str, language: str) -> str:

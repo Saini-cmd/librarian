@@ -3,7 +3,7 @@ import os
 from typing import Iterator
 
 from dotenv import load_dotenv
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 
 from rag.types import LLMConfig, LLMResponse
@@ -58,6 +58,8 @@ class LLMClient:
             content = msg.get("content", "")
             if role == "system":
                 result.append(SystemMessage(content=content))
+            elif role == "assistant":
+                result.append(AIMessage(content=content))
             else:
                 result.append(HumanMessage(content=content))
         return result

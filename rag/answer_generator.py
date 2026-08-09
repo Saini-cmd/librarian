@@ -31,11 +31,19 @@ class AnswerGenerator:
         retrieved_chunks: list[RetrievedChunk | dict],
         stream: bool = False,
         repo_hash: str | None = None,
+        history: list[dict[str, str]] | None = None,
+        memory_texts: list[str] | None = None,
     ) -> AnswerResult:
         logger.info("stage=answer_generation_start retrieved=%d", len(retrieved_chunks))
 
         context = self.context_builder.build(retrieved_chunks)
-        prompt_payload = self.prompt_builder.build(query=query, context=context, repo_hash=repo_hash)
+        prompt_payload = self.prompt_builder.build(
+            query=query,
+            context=context,
+            repo_hash=repo_hash,
+            history=history,
+            memory_texts=memory_texts,
+        )
         llm_response = self.llm_client.generate(prompt_payload.messages, stream=stream)
 
         citations = self._map_citations(llm_response.text, context, repo_hash)
