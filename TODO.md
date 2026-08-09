@@ -6,13 +6,22 @@ Working task list for the project. Check items off as they land; add side tasks 
 
 ## Symbol graph (see `PLAN.md` for the full plan)
 
-- [ ] **Phase 0 — Safety net**: `tests/test_10_symbol_graph.py` (12-language graph assertions); graph JSON `version` field + `GET /graph` stale-rebuild.
-- [ ] **Phase 1 — Symbol extraction**: fix C/C++ `function_definition`, Ruby `class`/`module`/`method`, Go `type_declaration`, Rust `impl_item`; add `qualified_name` + `parent_symbol` to `CodeChunk` (additive Qdrant payload keys); TSX parses with `tsx` grammar.
-- [ ] **Phase 2 — Import edges**: new `symbol_graph/imports.py` — Go block imports + `go.mod` prefix, C# namespace→file, Java/Kotlin member-strip, Rust `pub mod`/`super::`/`self::`, C/C++ angle + `../`, Python package-root, JS/TS `tsconfig` aliases.
-- [ ] **Phase 3 — Graph core rewrite**: qualified node ids, dedup by `(file, qualified_name)`, `contains` edges, `KIND_MAP` extension + method relabel, scoped reference resolution (same-scope → same-file → import-alias → unique-global, drop ambiguous), `uses` line/column, old-chunk fallback.
-- [ ] **Phase 4 — Graph-side synthesis**: generalized text-chunk walker for consts/vars, TS `type`/`enum`, C/C++ structs/enums, Rust traits/enums/modules, C# enums/records/structs, Python async fns/module vars; JSX component synthesis after TSX fix.
-- [ ] **Phase 5 — Frontend + integration**: colors for new kinds + `contains`; verify `SymbolGraph2DView`/`SymbolGraphView` + large-repo perf; stale-rebuild for pre-existing repos.
-- [ ] **Phase 6 — DOX + verification**: AGENTS.md updates (`chunking/`, `symbol_graph/`, `ingestion/`, `vector_store/`, `tests/`); run `test_01`–`test_10`; `./dev.sh` smoke + real-repo spot checks.
+- [x] **Phase 0 — Safety net (done, verified)**: `tests/test_10_symbol_graph.py` (87 checks green across 12 languages); graph JSON `version` field + `GET /graph` stale-rebuild.
+- [x] **Phase 1 — Symbol extraction (done, verified)**: `node_name()` per-node-type extraction (C/C++ fns, Ruby class/module/method, Go types, Rust impl `User`/`User::Fly`); Ruby wanted `{class, module, method}`; `qualified_name` + `parent_symbol` on `CodeChunk` (additive Qdrant payload keys); TSX parses with `tsx` grammar (label stays `typescript`); `KIND_MAP` + `method`/`module`. test_10 at 92 checks.
+- [x] **Phase 2 — Import edges (done, verified)**: new `symbol_graph/imports.py` — Go block imports + package-dir match, C# namespace→file, Java/Kotlin member-strip, Rust `pub mod`/`super::`/`self::`, C/C++ angle + `../`, Python package-root, JS/TS `tsconfig` aliases. test_10 at 99 checks (22 import cases + alias end-to-end).
+- [x] **Phase 3 — Graph core rewrite (done, verified)**: qualified node ids + `name`/`qualified_name`/`parent`; dedup by `(file, qualified_name)`; `contains` edges (file→top-level, parent→child); method relabel under class-like parents; scoped reference resolution (chain-aware, same-scope→same-file→import→unique-global, ambiguous dropped, `uses` line/column). test_10 at 112 checks.
+- [x] **Phase 4 — Graph-side synthesis (done, verified)**: generalized text-chunk walker (`symbol_graph/synthesis.py`) — consts/vars, TS `type`/`enum`, C/C++ structs/enums, Rust traits/enums/modules, C# enums/records/structs, Java enums/records, Go consts/vars, C++ namespaces; `.tsx` parsed with tsx grammar; JS/TS component vs function vs const; per-entity `uses` from own content. test_10 at 114 checks.
+- [x] **Phase 5 — Frontend + integration (done, verified)**: colors for new kinds + `contains` in `theme/index.js` + `design-system.css` (all palettes); `npm run build` green.
+- [x] **Phase 6 — Docs + targeted verification (done)**: AGENTS.md pass across phases; test_10 at 114 checks; app imports + frontend build.
+- [x] **Graph visuals P1/P2/P3 (done, verified)**: `onlyRenderVisibleElements` + adjacency-memo selection + redundant-edge pruning (P1); `contains`+`imports` structural layout (P2); nested file-group nodes with two-pass ELK per-file columns (P3); file-group handles so `imports`/`used_in` edges render. `npm run build` green.
+
+---
+
+## Deferred symbol-graph verification (needs infra + API spend)
+
+- [ ] **Full live verification** — infra up (`docker compose up -d`), then run `tests/test_01`…`test_09` + `test_10`; `./dev.sh` smoke; Graph view render (new kinds/`contains` colors) + chat RAG on an existing repo.
+- [ ] **Real-repo spot checks** — ingest one repo per major language (Python, JS/TS, C/C++, Rust, Go, C#, Ruby, Java, Kotlin) and eyeball the graph: entity coverage, containment, imports, scoped refs.
+- [ ] **`GET /graph` stale-rebuild e2e** — confirm a pre-existing persisted graph rebuilds when its `version` is below `GRAPH_VERSION`.
 
 ---
 
@@ -36,18 +45,16 @@ Working task list for the project. Check items off as they land; add side tasks 
 
 ## Side tasks / housekeeping
 
-- [ ] **Chat-memory worker not running** — the ARQ worker was stopped during the `repo_url` re-scope work; restart it (`venv/bin/arq memory.worker.WorkerSettings` or `./dev.sh`) before testing chat memory.
-- [ ] **6 orphaned `long_term_memory` points** — for the real user's conversation (`222c104f`), written under the old `repo_hash`-scoped schema (`repo_url=None`). Unreachable under `repo_url` scoping; purge pending user decision.
-- [ ] **`indexed_repo.status='syncing'` unused** — the enum value exists but sync never sets it (the new commit row goes `indexing` → `indexed`). Either set it during a sync for visibility or drop the value.
-- [ ] **Drop legacy `repo` payload tolerance** — `chunk_from_payload` still falls back to the old `repo` payload key. Since Qdrant is clean (hash-only), this can be removed.
-- [ ] **Security note** — `.env.local` (with a real `CLERK_SECRET_KEY`) was tracked in git history before deletion. It's gone from the working tree but still in history — `git rm --cached .env.local` + history purge/rotation if this repo ever goes public.
-- [ ] **Chat divider shows in fresh new chat** — the sync-boundary divider renders even when there's no sync boundary (brand-new conversation). Fix to only appear when an actual sync boundary exists.
-- [ ] **UI tweaks** — filter menu, sync screen, and the directory-filter button overflow (selected long path overflows the box).
+- [ ] **Security: purge `.env.local` from git history** — `.env.local` (with a real `CLERK_SECRET_KEY`) was tracked in git history before deletion. It's gone from the working tree but still in history — `git rm --cached .env.local` + history purge/rotation if this repo ever goes public.
 
 ---
 
 ## Done (reference)
 
+- Housekeeping: purged 6 orphaned `long_term_memory` points (old `repo_hash`-scoped schema, `repo_url=None`); confirmed chat-memory ARQ worker runs; dropped unused `indexed_repo.status` values (`pending`, `syncing`) from the documented set (real set: `indexing | indexed | failed | deleted`); removed legacy `repo` payload-key fallback in `chunk_from_payload`; fixed sync-boundary divider rendering in brand-new chats (was showing with no boundary); graph filter closes on repo change, dir-filter select truncates + tooltips, sync overlay shows the repo name
+- Graph: removed the `contains` edge type end-to-end (backend no longer emits it; `GRAPH_VERSION` bumped to 2; frontend theme/layout/legend updated) — containment is shown structurally by the nested file-group nodes
+- Graph: removed the `defines` edge type end-to-end (backend no longer emits it; `GRAPH_VERSION` bumped to 3; frontend theme/legend updated, `isRenderableEdge` gone) — file membership is shown by the nesting; final edge set is `uses` / `used_in` / `imports`
+- Summarization: retry-with-backoff per file (`SUMMARIZE_MAX_ATTEMPTS`/`SUMMARIZE_CONCURRENCY`) + real error logged (`exc_info`)
 - Per-commit identity (`repo_url` + `repo_hash`), hash-only Qdrant scoping
 - Probe-first `/api/process` (global-hash skip) + `/api/repositories/{repo_hash}/updates`
 - `/api/repositories/{repo_hash}/sync` — re-ingest/reuse → re-point conversations → tombstone old commits (retain cited chunks)

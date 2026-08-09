@@ -24,20 +24,36 @@ const EDGE_HIGHLIGHT_WIDTH = 2.5;
 const NODE_WIDTH = 200;
 const NODE_HEIGHT = 52;
 
-// Mirrors Understand-Anything's structural layout: layered ELK ranks +
-// orthogonal edge routing minimize crossings and tangles for code graphs.
-// aspectRatio ~1.0 (width ~ height) plus tighter rows / taller layer gaps
-// keeps the graph from expanding too wide relative to its height.
+// File-group containers: header + padding around each file's nested entities.
+const FILE_HEADER_HEIGHT = 30;
+const FILE_PADDING = 18;
+const FILE_MIN_WIDTH = 180;
+const FILE_MIN_HEIGHT = 70;
+
+// Root layout arranges the file groups (files-on-top block).
 const ELK_OPTIONS = {
   algorithm: "layered",
   "elk.direction": "DOWN",
   "elk.aspectRatio": "1.0",
-  "elk.layered.spacing.nodeNodeBetweenLayers": "150",
-  "elk.spacing.nodeNode": "44",
+  "elk.layered.spacing.nodeNodeBetweenLayers": "70",
+  "elk.spacing.nodeNode": "20",
   "elk.layered.crossingMinimization.strategy": "LAYER_SWEEP",
   "elk.edgeRouting": "ORTHOGONAL",
   "elk.layered.compaction.postCompaction.strategy": "LEFT",
-  "elk.padding": "[top=40,left=20,right=20,bottom=20]",
+  "elk.padding": "[top=10,left=10,right=10,bottom=10]",
+};
+
+// Intra-file layout stacks each file's entities into a narrow column
+// (aspectRatio << 1 prefers tall over wide).
+const ELK_FILE_OPTIONS = {
+  algorithm: "layered",
+  "elk.direction": "DOWN",
+  "elk.aspectRatio": "0.4",
+  "elk.layered.spacing.nodeNodeBetweenLayers": "18",
+  "elk.spacing.nodeNode": "12",
+  "elk.layered.crossingMinimization.strategy": "LAYER_SWEEP",
+  "elk.edgeRouting": "ORTHOGONAL",
+  "elk.padding": "[top=6,left=6,right=6,bottom=6]",
 };
 
 const elk = new ELK();
@@ -73,32 +89,53 @@ function writeCachedLayout(key, positions) {
   }
 }
 
-function applyPositions(flowNodes, flowEdges, positions, selectedId) {
-  const byId = new Map(positions.map((p) => [p.id, p]));
-  return flowNodes.map((n) => {
-    const p = byId.get(n.id);
-    const flags = nodeFlags(n.id, selectedId, flowEdges);
-    return {
-      ...n,
-      position: { x: p ? p.x : 0, y: p ? p.y : 0 },
-      data: { ...n.data, ...flags },
-    };
-  });
-}
-
 function kindColor(kind, kinds) {
   return kinds[kind] || kinds.entity;
 }
 
-function nodeFlags(id, selectedId, edges) {
+function nodeFlags(id, selectedId, neighbors) {
   if (!selectedId) return { selected: false, neighbor: false, faded: false };
   if (id === selectedId) return { selected: true, neighbor: false, faded: false };
-  const neighbor = edges.some(
-    (e) =>
-      (e.source === selectedId && e.target === id) ||
-      (e.target === selectedId && e.source === id)
-  );
+  const neighbor = neighbors.has(id);
   return { selected: false, neighbor, faded: !neighbor };
+}
+
+function partitionByFile(graphNodes) {
+  const files = [];
+  const fileById = new Map();
+  const entitiesByFile = new Map();
+  for (const n of graphNodes) {
+    if (n.kind === "file") {
+      files.push(n);
+      fileById.set(n.id, n);
+    } else {
+      const arr = entitiesByFile.get(n.file) || [];
+      arr.push(n);
+      entitiesByFile.set(n.file, arr);
+    }
+  }
+  return { files, fileById, entitiesByFile };
+}
+
+// Flags for the whole node set. A file group stays active while it contains the
+// selected node or a highlighted neighbor (its entities are nested inside it).
+function flagNodes(fileNodes, entityNodes, selectedId, neighbors) {
+  const flaggedEntities = entityNodes.map((n) => ({
+    ...n,
+    data: { ...n.data, ...nodeFlags(n.id, selectedId, neighbors) },
+  }));
+  const activeFiles = new Set();
+  for (const n of flaggedEntities) {
+    if (n.data.selected || n.data.neighbor) activeFiles.add(n.parentId);
+  }
+  const flaggedFiles = fileNodes.map((n) => {
+    let flags;
+    if (n.id === selectedId) flags = { selected: true, neighbor: false, faded: false };
+    else if (activeFiles.has(n.id)) flags = { selected: false, neighbor: true, faded: false };
+    else flags = nodeFlags(n.id, selectedId, neighbors);
+    return { ...n, data: { ...n.data, ...flags } };
+  });
+  return [...flaggedFiles, ...flaggedEntities];
 }
 
 function edgeStyles(ed, selectedId, colors) {
@@ -164,7 +201,37 @@ const NodeCard = memo(function NodeCard({ data }) {
   );
 });
 
-const nodeTypes = { ua: NodeCard };
+// A file group container: React Flow renders the file's entity children inside it.
+const FileGroup = memo(function FileGroup({ data }) {
+  const { label, color, selected, neighbor, faded } = data;
+  return (
+    <div
+      className={`h-full w-full rounded-2xl border border-base-content/15 bg-base-200/60 shadow-sm transition-[opacity,box-shadow,outline] duration-200 ${
+        selected
+          ? "outline outline-2 outline-primary"
+          : faded
+            ? "opacity-25"
+            : neighbor
+              ? "outline outline-1 outline-primary/50 opacity-90"
+              : ""
+      }`}
+    >
+      <Handle type="target" position={Position.Top} style={{ opacity: 0 }} />
+      <Handle type="source" position={Position.Bottom} style={{ opacity: 0 }} />
+      <div className="flex items-center gap-1.5 border-b border-base-content/10 px-2.5 py-1">
+        <span className="h-2 w-2 shrink-0 rounded-sm" style={{ backgroundColor: color }} />
+        <span
+          className="truncate font-mono text-[10px] font-semibold uppercase tracking-widest text-base-content"
+          title={label}
+        >
+          {label}
+        </span>
+      </div>
+    </div>
+  );
+});
+
+const nodeTypes = { ua: NodeCard, file: FileGroup };
 
 export default function SymbolGraph2DView({ graph, selectedId, onSelect }) {
   return (
@@ -172,6 +239,91 @@ export default function SymbolGraph2DView({ graph, selectedId, onSelect }) {
       <GraphFlow graph={graph} selectedId={selectedId} onSelect={onSelect} />
     </ReactFlowProvider>
   );
+}
+
+// Two-pass ELK layout: per-file columns (entities nested inside each file) then
+// a root layout that arranges the file groups. Returns file positions/dims
+// (absolute) + entity positions (relative to their parent file, padding applied).
+async function computeLayout({ flowFileNodes, flowEntityNodes, flowEdges, fileIds }) {
+  const entitiesByParent = new Map();
+  for (const n of flowEntityNodes) {
+    const key = n.parentId || "__root__";
+    if (!entitiesByParent.has(key)) entitiesByParent.set(key, []);
+    entitiesByParent.get(key).push(n);
+  }
+
+  const filePos = new Map(); // fileId -> absolute {x, y}
+  const fileDims = new Map(); // fileId -> {width, height}
+  const entityPos = new Map(); // entityId -> relative-to-parent {x, y}
+
+  for (const fileNode of flowFileNodes) {
+    const entities = entitiesByParent.get(fileNode.id) || [];
+    let maxX = 0;
+    let maxY = 0;
+    if (entities.length) {
+      const intraEdges = flowEdges.filter(
+        (e) =>
+          e.edgeType === "uses" &&
+          entities.some((en) => en.id === e.source) &&
+          entities.some((en) => en.id === e.target)
+      );
+      const res = await elk.layout({
+        id: fileNode.id,
+        layoutOptions: ELK_FILE_OPTIONS,
+        children: entities.map((en) => ({ id: en.id, width: NODE_WIDTH, height: NODE_HEIGHT })),
+        edges: intraEdges.map((e) => ({ id: e.id, sources: [e.source], targets: [e.target] })),
+      });
+      for (const c of res.children || []) {
+        entityPos.set(c.id, {
+          x: (c.x ?? 0) + FILE_PADDING,
+          y: (c.y ?? 0) + FILE_PADDING + FILE_HEADER_HEIGHT,
+        });
+        maxX = Math.max(maxX, (c.x ?? 0) + NODE_WIDTH);
+        maxY = Math.max(maxY, (c.y ?? 0) + NODE_HEIGHT);
+      }
+    }
+    fileDims.set(fileNode.id, {
+      width: Math.max(FILE_MIN_WIDTH, maxX + FILE_PADDING * 2),
+      height: Math.max(FILE_MIN_HEIGHT, maxY + FILE_PADDING * 2 + FILE_HEADER_HEIGHT),
+    });
+  }
+
+  const rootRes = await elk.layout({
+    id: "root",
+    layoutOptions: ELK_OPTIONS,
+    children: flowFileNodes.map((f) => {
+      const d = fileDims.get(f.id) || { width: FILE_MIN_WIDTH, height: FILE_MIN_HEIGHT };
+      return { id: f.id, width: d.width, height: d.height };
+    }),
+    edges: flowEdges
+      .filter((e) => e.edgeType === "imports" && fileIds.has(e.source) && fileIds.has(e.target))
+      .map((e) => ({ id: e.id, sources: [e.source], targets: [e.target] })),
+  });
+  for (const c of rootRes.children || []) {
+    filePos.set(c.id, { x: c.x ?? 0, y: c.y ?? 0 });
+  }
+
+  return {
+    filePos: [...filePos.entries()],
+    fileDims: [...fileDims.entries()],
+    entityPos: [...entityPos.entries()],
+  };
+}
+
+function applyPositions(filteredBase, layout, selectedId, neighbors) {
+  const filePos = new Map(layout.filePos || []);
+  const fileDims = new Map(layout.fileDims || []);
+  const entityPos = new Map(layout.entityPos || []);
+  const files = filteredBase.flowFileNodes.map((n) => {
+    const p = filePos.get(n.id) || { x: 0, y: 0 };
+    const d = fileDims.get(n.id) || { width: FILE_MIN_WIDTH, height: FILE_MIN_HEIGHT };
+    return { ...n, position: { x: p.x, y: p.y }, width: d.width, height: d.height };
+  });
+  const entities = filteredBase.flowEntityNodes.map((n) => {
+    const p = entityPos.get(n.id) || { x: FILE_PADDING, y: FILE_PADDING + FILE_HEADER_HEIGHT };
+    return { ...n, position: { x: p.x, y: p.y } };
+  });
+  return flagNodes(files, entities, selectedId, neighbors);
 }
 
 function GraphFlow({ graph, selectedId, onSelect }) {
@@ -191,42 +343,74 @@ function GraphFlow({ graph, selectedId, onSelect }) {
   const base = useMemo(() => {
     const gNodes = graph?.nodes ?? [];
     const gEdges = graph?.edges ?? [];
-    const flowNodes = gNodes.map((n) => ({
+    const { files, fileById, entitiesByFile } = partitionByFile(gNodes);
+    const fileIds = new Set(files.map((f) => f.id));
+
+    const flowFileNodes = files.map((n) => ({
       id: n.id,
-      type: "ua",
+      type: "file",
       position: { x: 0, y: 0 },
+      width: FILE_MIN_WIDTH,
+      height: FILE_MIN_HEIGHT,
       data: {
         ...n,
-        label: n.label,
-        kind: n.kind,
-        color: kindColor(n.kind, graphTheme.kinds),
+        label: n.file,
+        kind: "file",
+        color: kindColor("file", graphTheme.kinds),
         selected: false,
         neighbor: false,
         faded: false,
       },
     }));
+
+    const flowEntityNodes = [];
+    for (const [filePath, ents] of entitiesByFile) {
+      const parent = fileById.get(`file:${filePath}`);
+      for (const n of ents) {
+        flowEntityNodes.push({
+          id: n.id,
+          type: "ua",
+          parentId: parent ? parent.id : null,
+          extent: "parent",
+          position: { x: 0, y: 0 },
+          width: NODE_WIDTH,
+          height: NODE_HEIGHT,
+          data: {
+            ...n,
+            label: n.label,
+            kind: n.kind,
+            color: kindColor(n.kind, graphTheme.kinds),
+            selected: false,
+            neighbor: false,
+            faded: false,
+          },
+        });
+      }
+    }
+
     const flowEdges = gEdges.map((e, i) => {
-      const stroke = graphTheme.edges[e.type] || graphTheme.fallback;
-      return {
-        id: `e${i}`,
-        source: e.source,
-        target: e.target,
-        edgeType: e.type,
-        type: "step",
-        markerEnd: {
-          type: MarkerType.ArrowClosed,
-          width: 12,
-          height: 12,
-          color: stroke,
-        },
-        style: {
-          stroke,
-          strokeWidth: EDGE_WIDTH,
-          opacity: EDGE_OPACITY,
-        },
-      };
-    });
-    return { flowNodes, flowEdges };
+        const stroke = graphTheme.edges[e.type] || graphTheme.fallback;
+        return {
+          id: `e${i}`,
+          source: e.source,
+          target: e.target,
+          edgeType: e.type,
+          type: "step",
+          markerEnd: {
+            type: MarkerType.ArrowClosed,
+            width: 12,
+            height: 12,
+            color: stroke,
+          },
+          style: {
+            stroke,
+            strokeWidth: EDGE_WIDTH,
+            opacity: EDGE_OPACITY,
+          },
+        };
+      });
+
+    return { flowFileNodes, flowEntityNodes, flowEdges, fileIds };
   }, [graph, graphTheme]);
 
   const kinds = useMemo(() => {
@@ -256,23 +440,50 @@ function GraphFlow({ graph, selectedId, onSelect }) {
     if (!filtersActive) return null;
     const ids = new Set();
     for (const n of graph?.nodes ?? []) {
-      if (nodeMatchesFilters(n, kindFilter, dirFilter)) ids.add(n.id);
+      if (n.kind === "file") continue; // files show only when they contain a match
+      if (nodeMatchesFilters(n, kindFilter, dirFilter)) {
+        ids.add(n.id);
+        ids.add(`file:${n.file}`); // keep the parent container visible
+      }
     }
     return ids;
   }, [graph, kindFilter, dirFilter, filtersActive]);
 
   const filteredBase = useMemo(() => {
     if (!matchSet) return base;
-    const flowNodes = base.flowNodes.filter((n) => matchSet.has(n.id));
+    const flowFileNodes = base.flowFileNodes.filter((f) => matchSet.has(f.id));
+    const flowEntityNodes = base.flowEntityNodes.filter((n) => matchSet.has(n.id));
     const flowEdges = base.flowEdges.filter(
       (e) => matchSet.has(e.source) && matchSet.has(e.target)
     );
-    return { flowNodes, flowEdges };
+    return { ...base, flowFileNodes, flowEntityNodes, flowEdges };
   }, [base, matchSet]);
 
+  const allFlowNodes = useMemo(
+    () => [...filteredBase.flowFileNodes, ...filteredBase.flowEntityNodes],
+    [filteredBase]
+  );
+
+  // Edges actually rendered.
+  const renderEdges = useMemo(
+    () => filteredBase.flowEdges,
+    [filteredBase]
+  );
+
+  // O(1) selection-neighbor lookups instead of scanning all edges per node.
+  const selectedNeighbors = useMemo(() => {
+    const set = new Set();
+    if (!selectedId) return set;
+    for (const e of filteredBase.flowEdges) {
+      if (e.source === selectedId) set.add(e.target);
+      if (e.target === selectedId) set.add(e.source);
+    }
+    return set;
+  }, [selectedId, filteredBase]);
+
   const filterCount = kindFilter.size + (dirFilter ? 1 : 0);
-  const matchCount = filteredBase.flowNodes.length;
-  const totalCount = base.flowNodes.length;
+  const matchCount = allFlowNodes.length;
+  const totalCount = base.flowFileNodes.length + base.flowEntityNodes.length;
   const filteredEmpty = filtersActive && matchCount === 0;
 
   function toggleKind(kind) {
@@ -292,6 +503,7 @@ function GraphFlow({ graph, selectedId, onSelect }) {
   useEffect(() => {
     setKindFilter(new Set());
     setDirFilter("");
+    setFilterOpen(false);
   }, [graph?.repo]);
 
   useEffect(() => {
@@ -304,7 +516,7 @@ function GraphFlow({ graph, selectedId, onSelect }) {
   }, [filterOpen]);
 
   useEffect(() => {
-    if (!filteredBase.flowNodes.length) {
+    if (!allFlowNodes.length) {
       setNodes([]);
       setEdges([]);
       setLayouting(false);
@@ -314,59 +526,26 @@ function GraphFlow({ graph, selectedId, onSelect }) {
     const repo = graph?.repo || "";
     const cacheKey =
       repo && !filtersActive
-        ? `ua-layout:v2:${repo}:${graphFingerprint(filteredBase.flowNodes, filteredBase.flowEdges)}`
+        ? `ua-layout:v6:${repo}:${graphFingerprint(allFlowNodes, filteredBase.flowEdges)}`
         : "";
-    const cacheable = cacheKey && filteredBase.flowNodes.length <= LAYOUT_CACHE_MAX_NODES;
+    const cacheable = cacheKey && allFlowNodes.length <= LAYOUT_CACHE_MAX_NODES;
 
     const cached = cacheable ? readCachedLayout(cacheKey) : null;
     if (cached) {
       setLayouting(false);
-      setNodes(applyPositions(filteredBase.flowNodes, filteredBase.flowEdges, cached, selectedIdRef.current));
-      setEdges(filteredBase.flowEdges.map((ed) => edgeStyles(ed, selectedIdRef.current, graphTheme)));
+      setNodes(applyPositions(filteredBase, cached, selectedIdRef.current, selectedNeighbors));
+      setEdges(renderEdges.map((ed) => edgeStyles(ed, selectedIdRef.current, graphTheme)));
       return undefined;
     }
 
     let cancelled = false;
-    // Structural edges only drive the layered ranks (like their dashboard):
-    // defines + imports give a clean hierarchy; dense uses/used_in edges are
-    // rendered on top but don't influence placement.
-    const layoutEdges = filteredBase.flowEdges.filter(
-      (e) => e.edgeType === "defines" || e.edgeType === "imports"
-    );
-    const input = {
-      id: "root",
-      layoutOptions: ELK_OPTIONS,
-      children: filteredBase.flowNodes.map((n) => ({
-        id: n.id,
-        width: NODE_WIDTH,
-        height: NODE_HEIGHT,
-      })),
-      edges: layoutEdges.map((e) => ({ id: e.id, sources: [e.source], targets: [e.target] })),
-    };
-
     setLayouting(true);
-    elk
-      .layout(input)
-      .then((pos) => {
+    computeLayout(filteredBase)
+      .then((layout) => {
         if (cancelled) return;
-        const byId = new Map(pos.children.map((c) => [c.id, c]));
-        const placed = filteredBase.flowNodes.map((n) => {
-          const p = byId.get(n.id);
-          const flags = nodeFlags(n.id, selectedIdRef.current, filteredBase.flowEdges);
-          return {
-            ...n,
-            position: { x: p ? p.x : 0, y: p ? p.y : 0 },
-            data: { ...n.data, ...flags },
-          };
-        });
-        if (cacheable) {
-          writeCachedLayout(
-            cacheKey,
-            placed.map((n) => ({ id: n.id, x: n.position.x, y: n.position.y }))
-          );
-        }
-        setNodes(placed);
-        setEdges(filteredBase.flowEdges.map((ed) => edgeStyles(ed, selectedIdRef.current, graphTheme)));
+        if (cacheable) writeCachedLayout(cacheKey, layout);
+        setNodes(applyPositions(filteredBase, layout, selectedIdRef.current, selectedNeighbors));
+        setEdges(renderEdges.map((ed) => edgeStyles(ed, selectedIdRef.current, graphTheme)));
         setLayouting(false);
       })
       .catch(() => {
@@ -377,17 +556,16 @@ function GraphFlow({ graph, selectedId, onSelect }) {
     return () => {
       cancelled = true;
     };
-  }, [filteredBase, filtersActive, graph, graphTheme, setEdges, setNodes]);
+  }, [allFlowNodes, filteredBase, filtersActive, graph, graphTheme, renderEdges, setEdges, setNodes]);
 
   useEffect(() => {
-    setNodes((nds) =>
-      nds.map((n) => ({
-        ...n,
-        data: { ...n.data, ...nodeFlags(n.id, selectedId, filteredBase.flowEdges) },
-      }))
-    );
+    setNodes((nds) => {
+      const files = nds.filter((n) => n.type === "file");
+      const entities = nds.filter((n) => n.type === "ua");
+      return flagNodes(files, entities, selectedId, selectedNeighbors);
+    });
     setEdges((eds) => eds.map((ed) => edgeStyles(ed, selectedId, graphTheme)));
-  }, [selectedId, filteredBase, graphTheme, setNodes, setEdges]);
+  }, [selectedId, selectedNeighbors, graphTheme, setNodes, setEdges]);
 
   useEffect(() => {
     if (nodes.length) {
@@ -406,6 +584,9 @@ function GraphFlow({ graph, selectedId, onSelect }) {
         colorMode={graphTheme.colorMode}
         minZoom={0.05}
         proOptions={{ hideAttribution: true }}
+        onlyRenderVisibleElements
+        nodesConnectable={false}
+        edgesFocusable={false}
         onNodeClick={(_, node) => node.data && onSelect(node.data)}
         onPaneClick={() => onSelect(null)}
       >
@@ -504,7 +685,9 @@ function GraphFlow({ graph, selectedId, onSelect }) {
                 <select
                   className="select select-sm select-bordered w-full font-mono text-[11px]"
                   value={dirFilter}
+                  title={dirFilter || "All directories"}
                   onChange={(e) => setDirFilter(e.target.value)}
+                  style={{ textOverflow: "ellipsis", overflow: "hidden", whiteSpace: "nowrap" }}
                 >
                   <option value="">All directories</option>
                   {dirs.map((dir) => {

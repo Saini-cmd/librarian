@@ -10,17 +10,144 @@ from chunking.chunk_model import CodeChunk
 from chunking.text_chunker import TextChunker
 from typing import List
 
-def collect_tree_nodes(node, wanted_nodes) -> List:
-    """Recursively collect AST nodes of interest"""
+# Identifier-family node types used as declaration names (C/C++ declarators).
+_IDENTIFIER_TYPES = {
+    "identifier",
+    "field_identifier",
+    "type_identifier",
+    "qualified_identifier",
+    "operator_name",
+}
+
+
+def _node_text(node) -> str | None:
+    try:
+        return node.text.decode("utf-8")
+    except Exception:
+        return None
+
+
+def _first_child_of_type(node, types: set):
+    """First direct *named* child whose type is in `types` (document order)."""
+    for child in node.named_children:
+        if child.type in types:
+            return child
+    return None
+
+
+def _descendant_of_type(node, node_type: str) -> None:
+    """First descendant of `node_type` in depth-first document order."""
+    if node.type == node_type:
+        return node
+    for child in node.named_children:
+        found = _descendant_of_type(child, node_type)
+        if found is not None:
+            return found
+    return None
+
+
+def _c_cpp_function_name(node) -> str | None:
+    """C/C++ function_definition: name lives in the declarator subtree."""
+    decl = _descendant_of_type(node, "function_declarator")
+    if decl is None:
+        return None
+    name_node = _first_child_of_type(decl, _IDENTIFIER_TYPES)
+    return _node_text(name_node) if name_node is not None else None
+
+
+def _go_type_name(node) -> str | None:
+    """Go type_declaration: name is type_spec's type_identifier."""
+    spec = _first_child_of_type(node, {"type_spec"})
+    if spec is None:
+        return None
+    name_node = _first_child_of_type(spec, {"type_identifier"})
+    return _node_text(name_node) if name_node is not None else None
+
+
+def _ruby_class_module_name(node) -> str | None:
+    """Ruby class/module: name is a constant (possibly in scope_resolution)."""
+    first = _first_child_of_type(node, {"constant", "scope_resolution"})
+    if first is None:
+        return None
+    if first.type == "scope_resolution":
+        consts = [c for c in first.named_children if c.type == "constant"]
+        return _node_text(consts[-1]) if consts else None
+    return _node_text(first)
+
+
+def _ruby_method_name(node) -> str | None:
+    """Ruby method: name is the first identifier child."""
+    name_node = _first_child_of_type(node, {"identifier"})
+    return _node_text(name_node) if name_node is not None else None
+
+
+def _rust_impl_symbol(node) -> str | None:
+    """Rust impl_item: symbol from the target type.
+
+    `impl User`      -> "User"
+    `impl Fly for U` -> "U::Fly" (type::trait, distinct from the type node).
+    """
+    type_ids = [c for c in node.named_children if c.type == "type_identifier"]
+    if len(type_ids) == 1:
+        return _node_text(type_ids[0])
+    if len(type_ids) >= 2:
+        type_name = _node_text(type_ids[-1])
+        trait_name = _node_text(type_ids[0])
+        if type_name and trait_name:
+            return f"{type_name}::{trait_name}"
+    return None
+
+
+def node_name(node, language: str) -> str | None:
+    """Best-effort name for any AST node (declarations and named containers).
+
+    Tries the generic `name` field first (covers every previously-working
+    language), then language-specific extraction for node types whose name is
+    nested elsewhere (C/C++ functions, Go types, Ruby class/module/method,
+    Rust impls). Returns None when the node carries no recognizable name.
+    """
+    name_node = node.child_by_field_name("name")
+    if name_node is not None:
+        return _node_text(name_node)
+
+    if language in ("c", "cpp") and node.type == "function_definition":
+        return _c_cpp_function_name(node)
+    if language == "go" and node.type == "type_declaration":
+        return _go_type_name(node)
+    if language == "ruby":
+        if node.type in ("class", "module"):
+            return _ruby_class_module_name(node)
+        if node.type == "method":
+            return _ruby_method_name(node)
+    if language == "rust":
+        if node.type == "impl_item":
+            return _rust_impl_symbol(node)
+    return None
+
+
+def collect_tree_nodes(node, wanted_nodes, language: str, parents=None) -> List:
+    """Recursively collect AST nodes of interest.
+
+    Returns a list of `(node, parent_chain)` where `parent_chain` is the dotted
+    list of named ancestors (including the node's own name, if any). Recursion
+    stops at the first wanted node, so nested wanted nodes are subsumed into
+    their nearest wanted ancestor's chunk.
+    """
     tree_nodes = []
+    parents = list(parents or [])
+
+    name = node_name(node, language)
+    if name:
+        parents.append(name)
 
     if node.type in wanted_nodes:
-        tree_nodes.append(node)
+        tree_nodes.append((node, parents))
     else:
         for child in node.children:
-            tree_nodes.extend(collect_tree_nodes(child, wanted_nodes))
+            tree_nodes.extend(collect_tree_nodes(child, wanted_nodes, language, parents))
 
     return tree_nodes
+
 
 class ASTChunker:
 
@@ -46,21 +173,23 @@ class ASTChunker:
         with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
             file_content = f.read()
 
-        # Parse AST
-        parser = self.parser_manager.get_parser(language)
+        # Parse AST — .tsx files use the JSX-aware `tsx` grammar while keeping
+        # the `language` label stable (typescript) so filters/metadata don't change.
+        parser_language = "tsx" if language == "typescript" and extension == ".tsx" else language
+        parser = self.parser_manager.get_parser(parser_language)
         tree = parser.parse(bytes(file_content, "utf-8"))
         root_node = tree.root_node
 
         chunks: List[CodeChunk] = []
 
-        # Collect AST nodes of interest
-        wanted_nodes = collect_tree_nodes(root_node, lang_config["wanted_nodes"])
-        wanted_nodes.sort(key=lambda n: n.start_byte)
+        # Collect AST nodes of interest (with their named-ancestor chain)
+        collected = collect_tree_nodes(root_node, lang_config["wanted_nodes"], language)
+        collected.sort(key=lambda item: item[0].start_byte)
 
         cursor = 0
         line = root_node.start_point[0] + 1  # 1-indexed
 
-        for node in wanted_nodes:
+        for node, parents in collected:
 
             # Handle gap before this node
             if cursor < node.start_byte:
@@ -95,19 +224,17 @@ class ASTChunker:
                 repo_hash=repo_hash,
             )
 
-            # Extract symbol safely
-            symbol_node = node.child_by_field_name("name")
-            symbol = None
-            if symbol_node:
-                try:
-                    symbol = symbol_node.text.decode("utf-8")
-                except Exception:
-                    symbol = None
+            # Symbol + qualified identity from the named-ancestor chain
+            symbol = parents[-1] if parents else None
+            parent_symbol = parents[-2] if len(parents) >= 2 else ""
+            qualified_name = ".".join(parents) if parents else ""
 
-            # Assign symbol and node_type
+            # Assign symbol, node_type, and graph metadata
             for chunk in node_chunks:
                 chunk.symbol = symbol
                 chunk.node_type = node.type
+                chunk.qualified_name = qualified_name
+                chunk.parent_symbol = parent_symbol
 
             chunks.extend(node_chunks)
 

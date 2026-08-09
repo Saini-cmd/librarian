@@ -28,7 +28,7 @@ from orchestration.orchestrator import Orchestrator
 from rag.llm_client import LLMClient
 from rag.types import LLMConfig
 from summarization.summary_store import SummaryStore
-from symbol_graph.graph_builder import build_repo_graph
+from symbol_graph.graph_builder import GRAPH_VERSION, build_repo_graph
 from vector_store.indexer import (
     chunk_from_payload,
     delete_points_by_repo_hash,
@@ -141,7 +141,7 @@ def repo_graph(
     user = upsert_user(db, clerk_id)
     repo = _require_repo_by_hash(db, user.clerk_id, repo_hash)
     graph = load_repo_graph(db, repo.repo_hash)
-    if graph is None:
+    if graph is None or graph.get("version", 0) < GRAPH_VERSION:
         graph = build_repo_graph(repo.repo_hash, repo_label=repo.repo_name)
         save_repo_graph(db, repo.repo_hash, graph)
     return graph

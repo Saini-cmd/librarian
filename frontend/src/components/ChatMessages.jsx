@@ -41,7 +41,7 @@ export default function ChatMessages({ messages, streaming, onCitationClick, rep
 
       {messages.map((msg, idx) => (
         <div key={msg.id}>
-          {idx === dividerIdx + 1 && (
+          {dividerIdx >= 0 && idx === dividerIdx + 1 && (
             <div className="divider my-4 text-xs text-base-content/50">
               {DIVIDER_TEXT}
             </div>
@@ -71,7 +71,7 @@ export default function ChatMessages({ messages, streaming, onCitationClick, rep
         </div>
       ))}
 
-      {dividerIdx === messages.length - 1 && (
+      {dividerIdx >= 0 && dividerIdx === messages.length - 1 && (
         <div className="divider my-4 text-xs text-base-content/50">
           {DIVIDER_TEXT}
         </div>

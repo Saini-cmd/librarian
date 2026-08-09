@@ -17,7 +17,8 @@ Qdrant client singleton and vector management. Default is a local Dockerized Qdr
 - Dense vector: `text_dense` (768-dim, Cosine)
 - Sparse vector: `text_sparse` defined in schema (idf modifier)
 - **Hash-only scoping**: payload carries `repo_url` (canonical repo URL, display) + `repo_hash` (globally-unique commit identity); all Qdrant reads and deletes filter by `repo_hash` alone — no `repo`/URL name filter
-- `chunk_from_payload` reads `repo_url` (legacy `repo` key tolerated), returns `CodeChunk | None`
+- Payload also carries `qualified_name` + `parent_symbol` (graph-only symbol metadata, additive); `chunk_from_payload` reads them via `.get` (defaults `""`) so pre-existing points without the keys stay valid
+- `chunk_from_payload` reads `repo_url` (Qdrant is hash-only, so no legacy `repo` key fallback), returns `CodeChunk | None`
 - `VectorIndexer.delete_by_repo_hash(repo_hash, keep_chunk_ids=None)` and module-level `delete_points_by_repo_hash(repo_hash, keep_chunk_ids, collection_name)` delete all of a commit's points except cited chunk ids (`must_not` on `chunk_id`) — used by sync cleanup
 
 ## Work Guidance

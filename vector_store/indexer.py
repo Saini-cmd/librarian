@@ -57,6 +57,8 @@ class VectorIndexer:
                     "language"      : chunk.language,
                     "symbol"        : chunk.symbol,
                     "node_type"     : chunk.node_type,
+                    "qualified_name": chunk.qualified_name,
+                    "parent_symbol" : chunk.parent_symbol,
                     "start_line"    : chunk.start_line,
                     "end_line"      : chunk.end_line,
                     "content"       : chunk.content,
@@ -161,7 +163,7 @@ def chunk_from_payload(payload: dict[str, Any]) -> CodeChunk | None:
 
     return CodeChunk(
         chunk_id=str(payload["chunk_id"]),
-        repo_url=str(payload.get("repo_url") or payload.get("repo") or ""),
+        repo_url=str(payload.get("repo_url") or ""),
         file_path=str(payload["file_path"]),
         absolute_path=str(payload["absolute_path"]),
         extension=str(payload["extension"]),
@@ -173,4 +175,6 @@ def chunk_from_payload(payload: dict[str, Any]) -> CodeChunk | None:
         end_line=int(payload["end_line"]),
         content=str(payload["content"]),
         repo_hash=payload.get("repo_hash"),
+        qualified_name=str(payload.get("qualified_name") or ""),
+        parent_symbol=str(payload.get("parent_symbol") or ""),
     )

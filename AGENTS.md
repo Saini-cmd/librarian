@@ -181,7 +181,7 @@ curl -X POST http://localhost:8000/api/reset   # wipes Qdrant collection + index
 | `rag/` | Answer generation — context building, prompt construction, LLM (DeepSeek via ChatOpenAI) |
 | `reranking/` | Reranking via OpenRouter API (cohere/rerank-4-fast) |
 | `summarization/` | Per-file LLM summarization (OpenRouter `ling-3.0-flash` via shared `SUMMARIZE_*` config) stored in PostgreSQL; shared with chat-memory rolling summaries |
-| `symbol_graph/` | Symbol graph builder — entity/file nodes + usage edges from Qdrant AST chunks (serves the frontend Graph view) |
+| `symbol_graph/` | Symbol graph builder — entity/file nodes + usage/containment/import edges; qualified ids + scoped references; rich entities synthesized graph-side from text chunks (serves the frontend Graph view) |
 | `retrieval/` | Hybrid retrieval — dense vector + BM25 + RRF + rerank |
 | `tests/` | Smoke-test scripts for each pipeline stage |
 | `vector_store/` | Qdrant client singleton and vector management (local Docker server default; cloud/embedded dormant) |

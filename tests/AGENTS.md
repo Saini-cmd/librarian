@@ -13,6 +13,7 @@ Sequential smoke-test / integration-test scripts for each pipeline stage. Run ma
 - `test_07_answer_generation.py` — End-to-end retrieval + answer generation
 - `test_08_summarization.py` — Per-file LLM summarization pipeline
 - `test_09_memory.py` — Chat memory: `conversation_summaries` table, short-term assembly, long-term store round-trip (fake embedder — no API)
+- `test_10_symbol_graph.py` — Symbol-graph regression harness (see `PLAN.md`): builds graphs from synthetic per-language snippets through the real chunker + graph builder and asserts current node/edge behavior, plus qualified-name/parent_symbol + payload round-trip; assertions marked `KNOWN_BUG (Phase N)` document defects later plan phases will fix
 - `bootstrap.py` — Path setup utility
 
 ## Local Contracts

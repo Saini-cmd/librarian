@@ -524,7 +524,13 @@ export default function AppPage() {
         )}
         {syncing && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-base-100/90 p-6">
-            <div className="w-full max-w-2xl">
+            <div className="w-full max-w-2xl space-y-3">
+              <div
+                className="text-center font-mono text-[11px] uppercase tracking-widest text-base-content/60 truncate"
+                title={selectedRepo || ""}
+              >
+                Syncing {selectedRepo || "repository"}
+              </div>
               <ProgressBar progress={syncProgress} statusText={statusText} />
             </div>
           </div>

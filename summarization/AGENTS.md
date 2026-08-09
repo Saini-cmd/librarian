@@ -13,9 +13,10 @@ Generates per-file summaries (~100 words) using a cheap shared summarization mod
 - Summaries stored as `(repo_hash, file_path, summary_text)` rows in `file_summary` — keyed by the repo **commit hash**, not the repo name
 - **Model is NOT the answer LLM**: `FileSummarizer` uses `LLMClient(build_summarizer_config())` — OpenRouter `inclusionai/ling-3.0-flash` (~10-17x cheaper than DeepSeek-chat), OpenAI-compatible `https://openrouter.ai/api/v1`. Flip back by setting `SUMMARIZE_MODEL`/`SUMMARIZE_BASE_URL`/`SUMMARIZE_API_KEY` (one env change); the chat answer LLM stays DeepSeek
 - Idempotent: skips if the commit already has summaries in the DB
-- Parallel: up to 5 concurrent LLM calls via `ThreadPoolExecutor`
+- Parallel: up to 5 concurrent LLM calls via `ThreadPoolExecutor` (`SUMMARIZE_CONCURRENCY`, default 5)
+- **Retry with backoff**: transient failures (e.g. OpenRouter 429 rate limiting on the cheap model) are retried per file with exponential backoff (2s, 4s, ...) up to `SUMMARIZE_MAX_ATTEMPTS` (default 3); only a failure after all attempts is skipped (logged once with traceback, not crashed). Non-transient file errors are retried too (bounded)
 - Truncates file content to ~3000 tokens before summarization
-- Failed summaries are skipped (logged, not crashed)
+- Failed summaries are skipped after exhausting retries (logged, not crashed)
 - Static interface preserved so `rag/prompt_builder.py` and tests load summaries unchanged
 
 ## Work Guidance

@@ -20,7 +20,7 @@ Investigation established the current graph is built from AST chunks only: entit
 | Symbol field | `CodeChunk.symbol` stays the **bare name** (embed text / BM25 for working languages stays byte-identical). Qualification lives in new optional fields (`qualified_name`, `parent_symbol`), graph-only |
 | Graph schema versioning | Graph JSON gains a `version` field (default 1); `GET /graph` lazily rebuilds + persists stale graphs. Frontend ignores unknown fields |
 | Node identity | `sym:{file}:{qualified_name}` (bare-name fallback). Dedup by `(file, qualified_name)` — fixes overload/method collapse |
-| Edge types | `defines` / `uses` / `used_in` / `imports` kept; new `contains` (entity → child) added. `uses` edges gain optional `line`/`column` |
+| Edge types | `uses` / `used_in` / `imports`. `uses` edges gain optional `line`/`column`. File membership and containment are **not** edge types — the frontend renders them structurally by nesting each file's entities inside the file node |
 | New kinds | `struct` / `enum` / `trait` / `module` / `const` / `type` / `component` added to `KIND_MAP`; Python/C++ methods relabeled `method`; frontend gets colors (unknown kinds already fall back to `entity`) |
 
 ## 3. Current-state gap (verified by probes)
@@ -51,54 +51,61 @@ Build a per-repo symbol index (name → defs with scope = file + qualified ances
 
 ## 6. Implementation phases
 
-### Phase 0 — Safety net (no behavior change)
-- [ ] New `tests/test_10_symbol_graph.py` (follows `test_XX` scheme): synthetic-snippet graph builds for all 12 languages asserting node/edge expectations — C fns, Ruby `def`/modules, Go types, Rust impls, dedup collapse, per-language imports, TSX/JSX, name-collision noise.
-- [ ] Graph JSON `version` field; `GET /graph` (`backend/routers/repositories.py:135-147`) version-check + lazy rebuild.
+### Phase 0 — Safety net (done, verified)
+- [x] New `tests/test_10_symbol_graph.py` (follows `test_XX` scheme): synthetic-snippet graph builds for all 12 languages asserting node/edge expectations — C fns, Ruby `def`/modules, Go types, Rust impls, dedup collapse, per-language imports, TSX/JSX, name-collision noise. Verified: 87 checks green (`python tests/test_10_symbol_graph.py`).
+- [x] Graph JSON `version` field; `GET /graph` (`backend/routers/repositories.py:135-147`) version-check + lazy rebuild.
 
-### Phase 1 — Fix symbol extraction (foundation)
-- [ ] `chunking/ast_chunker.py`: per-node-type name extraction — C/C++ `function_definition` → `function_declarator` → `identifier`/`field_identifier`; Ruby wanted `{class, module, method}`, name from `constant`/first `identifier`; Go `type_declaration` → `type_spec` → `type_identifier`; Rust `impl_item` → synthesized symbol from target type (`User`, `User::Fly`).
-- [ ] `chunking/ast_config.py`: correct wanted sets for Ruby (`method` not `def`); no new entity-producing wanted nodes (RAG freeze).
-- [ ] `chunking/chunk_model.py`: `qualified_name`, `parent_symbol` optional fields.
-- [ ] `vector_store/indexer.py` + `chunk_from_payload`: persist/read the new keys (additive).
-- [ ] `chunking/parser_manager.py` / `ingestion/constants.py`: `.tsx` parses with the `tsx` grammar while keeping the `language` label stable.
-- [ ] Verify: embed text / BM25 for working languages (Python/JS/TS/Java/Kotlin/C#) byte-identical; broken languages (C/Ruby/Go/Rust-impl) symbols go empty → real.
+### Phase 1 — Fix symbol extraction (done, verified)
+- [x] `chunking/ast_chunker.py`: unified `node_name()` per-node-type name extraction — C/C++ `function_definition` → `function_declarator` → identifier; Ruby `class`/`module` → constant, `method` → first identifier; Go `type_declaration` → `type_spec`; Rust `impl_item` → `User` / `User::Fly`; named-ancestor chain threaded through `collect_tree_nodes` → `qualified_name` (dotted) + `parent_symbol` (nearest named ancestor). Symbols stay bare names.
+- [x] `chunking/ast_config.py`: Ruby wanted set `{class, module, method}` (was `{class, def}` — tree-sitter-ruby's real node type is `method`). No new wanted nodes elsewhere (RAG freeze holds).
+- [x] `chunking/chunk_model.py`: `qualified_name`, `parent_symbol` optional fields (graph-only; not in embed text).
+- [x] `vector_store/indexer.py` + `chunk_from_payload`: persist/read the new keys (additive, `.get` defaults → old points valid).
+- [x] TSX: `.tsx` files parse with the `tsx` grammar via an extension override in `ast_chunker` (parser_language), keeping the `language` label `typescript` stable.
+- [x] `KIND_MAP`: added `method` + `module` (Ruby node types).
+- [x] Verified: `python tests/test_10_symbol_graph.py` — 92 checks green; working languages (Python/JS/TS/Java/Kotlin/C#) byte-identical (symbol/entity sets unchanged, no parent-chain pollution); C/C++/Ruby/Go/Rust-impl symbols empty → real; payload round-trip + old-payload compat confirmed.
 
-### Phase 2 — Import edges overhaul
-- [ ] New `symbol_graph/imports.py` (per-language extraction + resolution), `graph_builder.py` delegates.
-- [ ] Go: `import ( "x" )` extraction; first-party resolution via `go.mod` module-prefix mapping; else `None`.
-- [ ] C#: namespace → file candidates, strip member names, `using X = Y;`.
-- [ ] Java/Kotlin: strip member from static/member imports; wildcards.
-- [ ] Rust: capture `pub mod`/`pub(crate) mod`; resolve `super::`/`self::`/`crate::`; strip item path to module.
-- [ ] C/C++: angle-bracket project includes; root-relative `../` resolution.
-- [ ] Python: resolve absolute imports against the detected package root (not always repo root).
-- [ ] JS/TS: `tsconfig` `paths`/`baseUrl` aliases; bare specifiers stay `None`.
-- [ ] `imports` stays file→file (edge schema unchanged); covered by test_10.
+### Phase 2 — Import edges (done, verified)
+- [x] New `symbol_graph/imports.py` (extraction + resolution); `graph_builder.py` delegates (`extract_import_refs`/`resolve_import`/`load_ts_aliases`).
+- [x] Go: block + single-line extraction; first-party resolution via package-dir suffix match against `.go` files (no `go.mod` needed); externals → `None`.
+- [x] C#: namespace → file (progressive dir + file candidates, `using X = Y;` alias target); externals → `None`.
+- [x] Java/Kotlin: static/member imports progressively stripped (`a.b.C.M` → `a/b/C`), wildcards handled.
+- [x] Rust: `pub mod`/`pub(crate) mod` captured; `super::`/`self::`/`crate::` resolved; item path stripped to module; `std`/`core` → `None`.
+- [x] C/C++: quoted + angle project includes; source-dir/ancestor-dir/root/src-root candidates fix `../` and angle includes.
+- [x] Python: absolute imports resolved against package roots (nearest `__init__.py` ancestors) + repo root (fixes `src/` layouts).
+- [x] JS/TS: tsconfig `paths`/`baseUrl` aliases loaded from the `tsconfig.json`/`jsconfig.json` chunk (`@/...` → file); bare specifiers stay `None`.
+- [x] `imports` stays file→file (edge schema unchanged); verified in test_10 (all 22 import cases + tsconfig alias end-to-end pass).
 
-### Phase 3 — Graph core rewrite
-- [ ] Qualified node ids `sym:{file}:{qualified_name}`; node fields `name`, `qualified_name`, `parent`; `label` stays display name.
-- [ ] Dedup by `(file, qualified_name)`.
-- [ ] New `contains` edge type from parent chains (class→method, module→member, impl→method, file→top-level).
-- [ ] `KIND_MAP` extension + Python/C++ method relabeling.
-- [ ] Scoped reference resolution (per 5c): symbol index, chain-aware reference extraction, same-scope → same-file → import-alias → unique-global, drop ambiguous; `uses` gain `line`/`column`; `used_in` derived from cross-file `uses`.
-- [ ] Old-chunk fallback path preserved (name-only) — old repos still build identically.
+### Phase 3 — Graph core rewrite (done, verified)
+- [x] Qualified node ids `sym:{file}:{qualified_name}` (bare-name fallback for old chunks); node fields `name`, `qualified_name`, `parent`; `label` stays display name.
+- [x] Dedup by `(file, qualified_name)` — same-name methods in different classes stay distinct (tested).
+- [x] New `contains` edge type: file → top-level entities, parent entity → child (from qualified chains); `defines` unchanged.
+- [x] `KIND_MAP` + method relabel: functions nested under a class-like parent (`class`/`interface`/`impl`) become `method`.
+- [x] Scoped reference resolution: chain-aware extraction (`AuthService.login()`), resolve same-scope → same-file → imported-module (reuses import map) → unique-global; ambiguous dropped; `uses` edges gain `line`/`column`; `used_in` emitted for cross-file refs.
+- [x] Old-chunk fallback: no `qualified_name`/`parent` → bare-name ids + name-only resolution (old Qdrant payloads still build).
+- [x] Verified: test_10 at 112 checks (noise-elimination, dedup, contains, method relabel, chain resolution, ambiguous-drop, node schema).
 
-### Phase 4 — Graph-side synthesis (rich entities)
-- [ ] Generalize `_js_component_declarations` → per-language text-chunk walker (consts, TS `type`/`enum`, C/C++ structs/enums, Rust traits/enums/modules, C# enums/records/structs, Python async fns/module vars).
-- [ ] TSX JSX components synthesize (depends on Phase 1); React components vs plain function consts distinguished (`component` vs `function`).
+### Phase 4 — Graph-side synthesis (done, verified)
+- [x] Generalized text-chunk walker in `symbol_graph/synthesis.py`: module-level consts/vars (Python, Ruby, Kotlin, JS/TS), TS `type`/`enum`, C/C++ structs/enums/unions/typedefs + C++ namespaces, Rust traits (+ methods)/enums/types/consts/statics/modules, C# enums/records/structs/delegates, Java enums/records, Go consts/vars — all mined from text chunks, **zero RAG-corpus change**.
+- [x] Synthesized containers (trait/module/namespace) qualify nested declarations (`Fly.fly`, `parent="Fly"`), feeding `contains`.
+- [x] TSX: `.tsx` chunks (language `typescript`) parsed with the JSX-aware `tsx` grammar in synthesis + reference detection (extension-based).
+- [x] JS/TS components distinguished: PascalCase/JSX arrow/function consts → `component`; lowercase → `function`; non-function consts → `const`; class expressions → `class`.
+- [x] Each synthesized entity emits `uses` from its OWN declaration content (not the whole text chunk) — avoids N² const noise.
+- [x] Verified: test_10 at 114 checks (rich-entity coverage per language, component vs function, .tsx JSX, const kinds); sanity builds across all 12 languages show enums/structs/types/consts/traits/records present; component `uses` + imports edges correct.
 
-### Phase 5 — Frontend + integration
-- [ ] `frontend/src/theme/index.js` + `design-system.css`: colors for new kinds and `contains` (unknown kinds/edges already fall back).
-- [ ] Verify `SymbolGraph2DView` / `SymbolGraphView` handle deeper ids, new kinds, `contains`, large-repo layout perf.
-- [ ] `GET /graph` stale-rebuild confirmed end-to-end for pre-existing repos.
+### Phase 5 — Frontend + integration (done, verified)
+- [x] `frontend/src/theme/index.js` + `design-system.css`: colors for the new kinds (`struct`/`enum`/`trait`/`module`/`type`/`const`/`var`/`record`/`union`/`component`) and the `contains` edge, in all palettes (`:root`/brutalist+glass dark, apple-glass light, clay light); JS fallbacks in sync.
+- [x] Verified `SymbolGraph2DView`/`SymbolGraphView`: node-kind color lookup falls back to `entity`, edge color to `fallback`; the ELK layout still uses `defines`+`imports` as structural edges (adding `contains` would create file-entity cycles) while `contains`/`uses`/`used_in` render on top; kind filter menu derives from loaded kinds automatically. Frontend builds clean (`npm run build`).
+- [x] `GET /graph` stale-rebuild: version-check logic landed in Phase 0 (`graph.get("version", 0) < GRAPH_VERSION`) and the version field is asserted in test_10; live end-to-end against Postgres/Qdrant needs infra + a real repo (deferred — see TODO.md).
 
-### Phase 6 — Docs + verification (DOX pass)
-- [ ] Update AGENTS.md: `chunking/` (qualified fields, no-new-wanted-nodes), `symbol_graph/` (new node/edge schema, kinds, version), `orchestration/`, `ingestion/` (tsx mapping), `vector_store/` (payload keys), `tests/` (test_10).
-- [ ] Refresh `TODO.md` with remaining side tasks.
-- [ ] Run: `test_01`…`test_09` + new `test_10`; `./dev.sh` smoke; Graph view render + chat RAG on an existing repo; one real repo per major language.
+### Phase 6 — Docs + verification (done, targeted)
+- [x] AGENTS.md updated across phases: `chunking/` (Phase 1), `symbol_graph/` (Phases 0-4), `vector_store/` (Phase 1), `tests/` (Phase 0), root row for `symbol_graph/` (Phase 5); `orchestration/` + `ingestion/` needed no changes (flow/extension mapping unchanged).
+- [x] `TODO.md` refreshed (phases done + deferred live-verification items added).
+- [x] Targeted verification: `tests/test_10_symbol_graph.py` (114 checks), Python syntax + app imports, frontend `npm run build`.
+- [ ] Full `test_01`…`test_09` + `./dev.sh` smoke + Graph view render + chat RAG on an existing repo + one real repo per major language — requires infra up + network + OpenRouter API spend; **deferred** (tracked in TODO.md).
 
 ## 7. Expected impact
 
-- **Graph quality**: entity nodes for all 12 languages (incl. C/Ruby/Go/Rust which are effectively empty today); no collapsed same-name symbols; real hierarchy via `contains`; precise scoped references (no cross-symbol noise); working import edges for Go/C#/Rust/C/C++.
+- **Graph quality**: entity nodes for all 12 languages (incl. C/Ruby/Go/Rust which are effectively empty today); no collapsed same-name symbols; precise scoped references (no cross-symbol noise); working import edges for Go/C#/Rust/C/C++. Hierarchy is conveyed structurally by the frontend (entities nested inside file nodes)
 - **RAG / retrieval**: unchanged — corpus frozen, `symbol` values unchanged for working languages, embed text / BM25 byte-identical.
 - **Frontend**: additive — unknown kinds/edges already render via fallback colors; new colors are polish.
 - **Persistence**: backward compatible — old graphs render, old chunks rebuild via name-only fallback, new chunks carry the richer fields.

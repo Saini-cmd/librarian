@@ -86,6 +86,6 @@ AST_CONFIG = {
     # -------------------------
     "ruby": {
         "language": lambda: get_language("ruby"),
-        "wanted_nodes": {"class", "def"},
+        "wanted_nodes": {"class", "module", "method"},
     },
 }

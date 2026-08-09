@@ -1,10 +1,12 @@
-import os
-import re
 from typing import Any
 
 from qdrant_client.models import FieldCondition, Filter, MatchValue
 
 from chunking.parser_manager import ParserManager
+from symbol_graph.imports import extract_import_refs as _extract_import_refs
+from symbol_graph.imports import load_ts_aliases as _load_ts_aliases
+from symbol_graph.imports import resolve_import as _resolve_import
+from symbol_graph.synthesis import synthesize_entities as _synthesize_entities
 from vector_store.indexer import chunk_from_payload
 from vector_store.qdrant_client import QdrantManager
 
@@ -12,6 +14,10 @@ from vector_store.qdrant_client import QdrantManager
 COLLECTION_NAME = "code_chunks"
 MAX_SNIPPET_CHARS = 4000
 MIN_SYMBOL_LEN = 2
+
+# Graph schema version. Bump when the graph JSON shape changes; `GET /graph`
+# lazily rebuilds + persists stored graphs whose version is below this.
+GRAPH_VERSION = 3
 
 KIND_MAP = {
     "class_definition": "class",
@@ -27,6 +33,8 @@ KIND_MAP = {
     "function_declaration": "function",
     "function_item": "function",
     "def": "function",
+    "method": "method",
+    "module": "module",
     "method_definition": "method",
     "method_declaration": "method",
 }
@@ -93,222 +101,86 @@ def _parse(language: str, content: str):
         return None
 
 
-def _identifiers_for_content(language: str, content: str) -> set[str]:
-    """Return identifier/type_identifier names found in a code snippet.
+def _node_text(node) -> str | None:
+    try:
+        return node.text.decode("utf-8")
+    except Exception:
+        return None
+
+
+_MEMBER_ACCESS_NODE: dict[str, str | None] = {
+    "javascript": "member_expression",
+    "typescript": "member_expression",
+    "tsx": "member_expression",
+    "python": "attribute",
+    "java": "field_access",
+    "kotlin": "navigation_expression",
+    "c": None,
+    "cpp": "field_expression",
+    "rust": "field_expression",
+    "go": "selector_expression",
+    "csharp": "member_access_expression",
+    "ruby": "call",
+}
+
+
+def _member_chain(node, language: str) -> str | None:
+    """If `node` is the field/method side of a member access, return the object
+    name (e.g. `AuthService` for `AuthService.login`); else None."""
+    access_type = _MEMBER_ACCESS_NODE.get(language)
+    parent = node.parent
+    if access_type is None or parent is None or parent.type != access_type:
+        return None
+    named = parent.named_children
+    if len(named) < 2:
+        return None
+    obj = named[0]
+    if not (obj.type.endswith("identifier") or obj.type == "constant"):
+        return None  # object is not a simple identifier
+    if node == obj:
+        return None  # this identifier IS the object side
+    return _node_text(obj)
+
+
+def _references_for_content(
+    language: str,
+    content: str,
+    start_line: int,
+    extension: str = "",
+) -> list[tuple[str, int, int, str | None]]:
+    """Return `(name, line, column, chain)` for every identifier reference.
 
     Collects every node whose type ends with 'identifier' (identifier,
     type_identifier, field_identifier, property_identifier, method_identifier),
-    which covers real references across tree-sitter grammars, plus `constant`
-    nodes (Ruby class/module/constant references, which are a distinct node type
-    in tree-sitter-ruby). Unsupported languages or parse errors are skipped
-    gracefully.
+    plus `constant` nodes (Ruby class/module/constant references). `chain` is
+    the dotted object name when the identifier is a member-access field
+    (`AuthService.login`), else None. `.tsx` chunks (language `typescript`)
+    are parsed with the JSX-aware `tsx` grammar via `extension`. Lines are
+    absolute (chunk `start_line` offset); columns are within the chunk.
+    Unsupported languages / parse errors yield nothing.
     """
-    tree = _parse(language, content)
+    parse_lang = "tsx" if language == "typescript" and extension == ".tsx" else language
+    tree = _parse(parse_lang, content)
     if tree is None:
-        return set()
-    idents: set[str] = set()
+        return []
+    refs: list[tuple[str, int, int, str | None]] = []
     stack = [tree.root_node]
     while stack:
         node = stack.pop()
         if node.type.endswith("identifier") or node.type == "constant":
-            text = node.text
+            text = _node_text(node)
             if text:
-                try:
-                    idents.add(text.decode("utf-8"))
-                except Exception:
-                    pass
-        stack.extend(node.children)
-    return idents
-
-
-_JS_TS_LANGS = {"javascript", "typescript", "tsx"}
-_COMPONENT_VALUE_TYPES = {
-    "arrow_function",
-    "function_expression",
-    "generator_function",
-    "class_expression",
-}
-_COMPONENT_BOUNDARY_TYPES = _COMPONENT_VALUE_TYPES | {
-    "function_declaration",
-    "function_definition",
-    "method_definition",
-    "class_declaration",
-    "class_definition",
-    "object",
-    "statement_block",
-    "template_string",
-}
-
-
-def _js_component_declarations(language: str, content: str, start_line: int) -> list[dict[str, Any]]:
-    """Find `const X = () => ...` / function-expression components in a snippet.
-
-    React/JS components written as arrow or function expressions are
-    `variable_declarator` nodes (not function/class declarations), so the AST
-    chunker misses them. This scans JS/TS text chunks and returns module-level
-    declarators whose value is a function/class expression, so the graph can
-    include them as entities.
-    """
-    if language not in _JS_TS_LANGS:
-        return []
-    tree = _parse(language, content)
-    if tree is None:
-        return []
-    results: list[dict[str, Any]] = []
-    stack = [tree.root_node]
-    while stack:
-        node = stack.pop()
-        if node.type == "variable_declarator":
-            name_node = node.child_by_field_name("name")
-            value_node = node.child_by_field_name("value")
-            if (
-                name_node is not None
-                and name_node.type == "identifier"
-                and value_node is not None
-                and value_node.type in _COMPONENT_VALUE_TYPES
-            ):
-                try:
-                    name = name_node.text.decode("utf-8")
-                    source = node.text.decode("utf-8")
-                except Exception:
-                    stack.extend(node.children)
-                    continue
-                if len(name) >= MIN_SYMBOL_LEN:
-                    kind = "class" if value_node.type == "class_expression" else "function"
-                    results.append(
-                        {
-                            "name": name,
-                            "kind": kind,
-                            "start_line": start_line + node.start_point[0],
-                            "end_line": start_line + node.end_point[0],
-                            "content": source[:MAX_SNIPPET_CHARS],
-                        }
+                refs.append(
+                    (
+                        text,
+                        start_line + node.start_point[0],
+                        node.start_point[1],
+                        _member_chain(node, parse_lang),
                     )
-        if node.type in _COMPONENT_BOUNDARY_TYPES:
-            continue
+                )
         stack.extend(node.children)
-    return results
-
-
-_IMPORT_PATTERNS: dict[str, list[re.Pattern]] = {
-    "javascript": [
-        re.compile(r"(?:import|export)\s+[^'\"`]*?\s+from\s+['\"]([^'\"]+)['\"]"),
-        re.compile(r"(?:import|require)\(\s*['\"]([^'\"]+)['\"]\s*\)"),
-        re.compile(r"import\s+['\"]([^'\"]+)['\"]"),
-    ],
-    "typescript": [
-        re.compile(r"(?:import|export)\s+[^'\"`]*?\s+from\s+['\"]([^'\"]+)['\"]"),
-        re.compile(r"(?:import|require)\(\s*['\"]([^'\"]+)['\"]\s*\)"),
-        re.compile(r"import\s+['\"]([^'\"]+)['\"]"),
-    ],
-    "tsx": [
-        re.compile(r"(?:import|export)\s+[^'\"`]*?\s+from\s+['\"]([^'\"]+)['\"]"),
-        re.compile(r"(?:import|require)\(\s*['\"]([^'\"]+)['\"]\s*\)"),
-        re.compile(r"import\s+['\"]([^'\"]+)['\"]"),
-    ],
-    "python": [
-        re.compile(r"^\s*import\s+([\w.]+)", re.M),
-        re.compile(r"^\s*from\s+([\w.]+)\s+import", re.M),
-    ],
-    "java": [re.compile(r"^\s*import\s+(?:static\s+)?([\w.]+)", re.M)],
-    "kotlin": [re.compile(r"^\s*import\s+([\w.]+)", re.M)],
-    "c": [re.compile(r'#include\s*"([^"]+)"')],
-    "cpp": [re.compile(r'#include\s*"([^"]+)"')],
-    "rust": [
-        re.compile(r"^\s*use\s+([\w:]+)", re.M),
-        re.compile(r"^\s*mod\s+([\w]+);", re.M),
-    ],
-    "csharp": [re.compile(r"^\s*using\s+([\w.]+)\s*;", re.M)],
-    "ruby": [re.compile(r"^\s*require(?:_relative)?\s+['\"]([^'\"]+)['\"]", re.M)],
-}
-
-
-def _extract_import_refs(language: str, content: str) -> list[str]:
-    refs: list[str] = []
-    for pattern in _IMPORT_PATTERNS.get(language, []):
-        for match in pattern.finditer(content):
-            refs.append(match.group(1).strip())
     return refs
 
-
-def _resolve_import(
-    ref: str,
-    source_file: str,
-    repo_files: set[str],
-    language: str,
-) -> str | None:
-    """Best-effort resolution of an import/module reference to a repo file."""
-    if not ref:
-        return None
-    base = os.path.dirname(source_file)
-    candidates: list[str] = []
-
-    if ref.startswith("."):
-        if language in ("javascript", "typescript", "tsx"):
-            for suffix in (
-                "",
-                ".js",
-                ".jsx",
-                ".ts",
-                ".tsx",
-                ".mjs",
-                ".cjs",
-                "/index.js",
-                "/index.jsx",
-                "/index.ts",
-                "/index.tsx",
-            ):
-                candidates.append(os.path.normpath(os.path.join(base, ref + suffix)))
-        elif language == "python":
-            dots = len(ref) - len(ref.lstrip("."))
-            parts = [p for p in ref.split(".") if p]
-            pkg = base
-            for _ in range(dots - 1):
-                pkg = os.path.dirname(pkg)
-            if parts:
-                mod = "/".join(parts)
-                candidates.append(os.path.join(pkg, mod + ".py"))
-                candidates.append(os.path.join(pkg, mod, "__init__.py"))
-            else:
-                candidates.append(os.path.join(pkg, "__init__.py"))
-        elif language == "ruby":
-            candidates.append(os.path.normpath(os.path.join(base, ref + ".rb")))
-        else:
-            candidates.append(os.path.normpath(os.path.join(base, ref)))
-    else:
-        if language in ("c", "cpp"):
-            # relative include (may be same-dir or relative to the source file)
-            candidates.append(os.path.normpath(os.path.join(base, ref)))
-            candidates.append(ref)
-        normalized = ref.replace(".", "/")
-        if language == "python":
-            candidates.extend([f"{normalized}.py", f"{normalized}/__init__.py"])
-        elif language in ("java", "kotlin"):
-            ext = ".java" if language == "java" else ".kt"
-            candidates.append(f"{normalized}{ext}")
-            candidates.append(f"src/main/java/{normalized}{ext}")
-            candidates.append(f"src/main/kotlin/{normalized}{ext}")
-        elif language == "rust":
-            mod = ref.replace("::", "/").replace("crate/", "")
-            if mod.count("/") >= 1:
-                mod = "/".join(mod.split("/")[:-1])
-            candidates.extend([f"src/{mod}.rs", f"src/{mod}/mod.rs"])
-        elif language == "csharp":
-            candidates.append(f"{normalized}/")
-        elif language == "ruby":
-            candidates.extend([f"{normalized}.rb", f"lib/{normalized}.rb"])
-        elif language in ("javascript", "typescript", "tsx", "go"):
-            return None  # bare specifiers are external packages
-
-    for cand in candidates:
-        if not cand:
-            continue
-        if cand in repo_files:
-            return cand
-        for rf in repo_files:
-            if rf.endswith(cand) or rf == cand:
-                return rf
-    return None
 
 
 def build_repo_graph(repo_hash: str | None = None, repo_label: str | None = None) -> dict[str, Any]:
@@ -316,15 +188,23 @@ def build_repo_graph(repo_hash: str | None = None, repo_label: str | None = None
 
     Nodes: one per file plus one per AST entity (class/function/method/...).
     Edges:
-      - `defines`: entity -> the file it is defined in
-      - `used_in`: entity -> another file whose chunk text references its name
-      - `uses`:    entity -> entity it references (same or other file)
-      - `imports`: file -> file, resolved from per-language import statements
+      - `used_in`:  entity -> another file whose chunk text references it
+      - `uses`:     entity -> entity it references (same or other file), with
+                    optional `line`/`column` of the first reference
+      - `imports`:  file -> file, resolved from per-language import statements
+
+    (File membership is NOT an edge type — `defines` was removed because the
+    frontend renders it structurally by nesting each file's entities inside the
+    file node; containment is likewise structural.)
 
     Symbol references are found by parsing each chunk's code with tree-sitter and
-    linking a symbol only when its name appears as an identifier in another
-    chunk's code. File-level `imports` edges are added by best-effort resolution
-    of import/module/include/require statements across all supported languages.
+    resolved by scope: same-scope -> same-file -> imported module -> unique global
+    match; ambiguous references are dropped (precision over recall). Qualified
+    node ids (`sym:{file}:{qualified_name}`) and containment come from the chunk
+    `qualified_name`/`parent_symbol` metadata added by the chunker; chunks without
+    it (old payloads) fall back to bare-name ids and name-only resolution.
+    File-level `imports` edges are added by best-effort resolution of
+    import/module/include/require statements across all supported languages.
 
     `repo_hash` scopes the graph to a specific commit (retained old-commit chunks
     are excluded when set).
@@ -362,12 +242,16 @@ def _build_graph_from_chunks(repo_label: str | None, chunks: list[Any]) -> dict[
         )
 
     for chunk in ast_chunks:
-        sym_key = f"sym:{chunk.file_path}:{chunk.symbol}"
+        qualified = chunk.qualified_name or chunk.symbol
+        sym_key = f"sym:{chunk.file_path}:{qualified}"
         existing = sym_nodes.get(sym_key)
         if existing is None:
             sym_nodes[sym_key] = {
                 "id": sym_key,
                 "label": chunk.symbol,
+                "name": chunk.symbol,
+                "qualified_name": qualified,
+                "parent": chunk.parent_symbol or "",
                 "kind": _kind(chunk.node_type),
                 "node_type": chunk.node_type,
                 "file": chunk.file_path,
@@ -382,17 +266,20 @@ def _build_graph_from_chunks(repo_label: str | None, chunks: list[Any]) -> dict[
             existing["end_line"] = max(existing["end_line"], chunk.end_line)
 
     for chunk in chunks:
-        if chunk.chunk_source == "ast" or chunk.language not in _JS_TS_LANGS:
+        if chunk.chunk_source == "ast":
             continue
-        for decl in _js_component_declarations(chunk.language, chunk.content, chunk.start_line):
-            sym_key = f"sym:{chunk.file_path}:{decl['name']}"
+        for decl in _synthesize_entities(chunk.language, chunk.extension, chunk.content, chunk.start_line):
+            sym_key = f"sym:{chunk.file_path}:{decl['qualified_name']}"
             if sym_key in sym_nodes:
                 continue
             sym_nodes[sym_key] = {
                 "id": sym_key,
                 "label": decl["name"],
+                "name": decl["name"],
+                "qualified_name": decl["qualified_name"],
+                "parent": decl["parent"],
                 "kind": decl["kind"],
-                "node_type": "variable_declarator",
+                "node_type": decl["node_type"],
                 "file": chunk.file_path,
                 "language": chunk.language,
                 "start_line": decl["start_line"],
@@ -400,71 +287,151 @@ def _build_graph_from_chunks(repo_label: str | None, chunks: list[Any]) -> dict[
                 "content": decl["content"],
             }
 
-    sym_def_files: dict[str, set[str]] = {}
+    # Functions nested under a class-like parent become methods.
     for node in sym_nodes.values():
-        sym_def_files.setdefault(node["label"], set()).add(node["file"])
+        if node["node_type"] not in ("function_definition", "function_item") or not node["parent"]:
+            continue
+        parent_q = node["qualified_name"].rsplit(".", 1)[0] if "." in node["qualified_name"] else None
+        parent_node = sym_nodes.get(f"sym:{node['file']}:{parent_q}") if parent_q else None
+        if parent_node and parent_node["kind"] in ("class", "interface", "impl"):
+            node["kind"] = "method"
 
-    symbol_set = set(sym_def_files.keys())
-
-    edge_set: set[tuple[str, str, str]] = set()
-
+    # Symbol index: name -> candidate definitions (for scoped resolution).
+    sym_index: dict[str, list[dict[str, Any]]] = {}
     for node in sym_nodes.values():
-        edge_set.add((node["id"], f"file:{node['file']}", "defines"))
+        sym_index.setdefault(node["name"], []).append(node)
+
+    edge_set: dict[tuple[str, str, str], dict] = {}
+
+    def _add_edge(source: str, target: str, etype: str, **meta) -> None:
+        if source != target:
+            edge_set[(source, target, etype)] = meta or None  # type: ignore[assignment]
+
+    repo_files = {f.file_path for f in chunks}
+    ts_aliases = _load_ts_aliases(chunks)
+
+    # File -> resolved import targets (used both for `imports` edges and scoping).
+    imported_by_file: dict[str, set[str]] = {}
+    for chunk in chunks:
+        src = chunk.file_path
+        for ref in _extract_import_refs(chunk.language, chunk.content):
+            target = _resolve_import(ref, src, repo_files, chunk.language, ts_aliases=ts_aliases)
+            if target and target != src:
+                imported_by_file.setdefault(src, set()).add(target)
+                _add_edge(f"file:{src}", f"file:{target}", "imports")
+
+    def _resolve_name(
+        name: str,
+        chunk_file: str,
+        chunk_parent: str,
+        imported_files: set[str],
+    ) -> dict[str, Any] | None:
+        """Scoped resolution: same-scope -> same-file -> imported -> unique global."""
+        candidates = sym_index.get(name)
+        if not candidates:
+            return None
+        if chunk_parent:
+            scoped = [c for c in candidates if c["file"] == chunk_file and c["parent"] == chunk_parent]
+            if len(scoped) == 1:
+                return scoped[0]
+        same_file = [c for c in candidates if c["file"] == chunk_file]
+        if len(same_file) == 1:
+            return same_file[0]
+        imported = [c for c in candidates if c["file"] in imported_files]
+        if len(imported) == 1:
+            return imported[0]
+        if len(candidates) == 1:
+            return candidates[0]
+        return None  # ambiguous -> drop (precision over recall)
+
+    def _resolve_ref(
+        name: str,
+        chain: str | None,
+        chunk_file: str,
+        chunk_parent: str,
+        imported_files: set[str],
+    ) -> dict[str, Any] | None:
+        if chain:
+            obj = _resolve_name(chain, chunk_file, chunk_parent, imported_files)
+            if obj:
+                children = [c for c in sym_index.get(name, []) if c["parent"] == obj["qualified_name"]]
+                return children[0] if len(children) == 1 else None
+        return _resolve_name(name, chunk_file, chunk_parent, imported_files)
 
     def _add_references(
         language: str,
         content: str,
         source_file: str,
+        chunk_start_line: int,
+        chunk_parent: str,
         source_sym_keys: list[str] | None,
+        extension: str = "",
     ) -> None:
-        if not symbol_set:
+        if not sym_index:
             return
-        idents = _identifiers_for_content(language, content)
-        if not idents:
-            return
-        for name in idents & symbol_set:
-            for def_file in sym_def_files.get(name, ()):
-                target_sym = f"sym:{def_file}:{name}"
-                if target_sym in sym_nodes:
-                    if source_sym_keys:
-                        for source_sym_key in source_sym_keys:
-                            if source_sym_key != target_sym:
-                                edge_set.add((source_sym_key, target_sym, "uses"))
-                    if def_file != source_file:
-                        edge_set.add((target_sym, f"file:{source_file}", "used_in"))
+        imported_files = imported_by_file.get(source_file, set())
+        for name, line, column, chain in _references_for_content(language, content, chunk_start_line, extension):
+            target = _resolve_ref(name, chain, source_file, chunk_parent, imported_files)
+            if target is None:
+                continue
+            if source_sym_keys:
+                for source_sym_key in source_sym_keys:
+                    if source_sym_key != target["id"]:
+                        _add_edge(source_sym_key, target["id"], "uses", line=line, column=column)
+            if target["file"] != source_file:
+                _add_edge(target["id"], f"file:{source_file}", "used_in")
 
     for chunk in ast_chunks:
-        sym_key = f"sym:{chunk.file_path}:{chunk.symbol}"
-        _add_references(chunk.language, chunk.content, chunk.file_path, [sym_key])
+        sym_key = f"sym:{chunk.file_path}:{chunk.qualified_name or chunk.symbol}"
+        _add_references(
+            chunk.language,
+            chunk.content,
+            chunk.file_path,
+            chunk.start_line,
+            chunk.parent_symbol or "",
+            [sym_key],
+            chunk.extension,
+        )
 
     for chunk in chunks:
         if chunk.chunk_source == "ast":
             continue
-        component_keys: list[str] = []
-        if chunk.language in _JS_TS_LANGS:
-            for decl in _js_component_declarations(chunk.language, chunk.content, chunk.start_line):
-                key = f"sym:{chunk.file_path}:{decl['name']}"
-                if key in sym_nodes:
-                    component_keys.append(key)
-        _add_references(chunk.language, chunk.content, chunk.file_path, component_keys or None)
-
-    repo_files = {f.file_path for f in chunks}
-    for chunk in chunks:
-        for ref in _extract_import_refs(chunk.language, chunk.content):
-            target = _resolve_import(ref, chunk.file_path, repo_files, chunk.language)
-            if target and target != chunk.file_path:
-                edge_set.add((f"file:{chunk.file_path}", f"file:{target}", "imports"))
+        # Each synthesized entity emits `uses` from its OWN declaration content
+        # (not the whole text chunk, which clusters module-level consts/vars).
+        for decl in _synthesize_entities(chunk.language, chunk.extension, chunk.content, chunk.start_line):
+            key = f"sym:{chunk.file_path}:{decl['qualified_name']}"
+            if key in sym_nodes:
+                _add_references(
+                    chunk.language,
+                    decl["content"],
+                    chunk.file_path,
+                    decl["start_line"],
+                    decl["parent"],
+                    [key],
+                    chunk.extension,
+                )
+        # File-level `used_in` from the chunk's own text (no source entity).
+        _add_references(
+            chunk.language,
+            chunk.content,
+            chunk.file_path,
+            chunk.start_line,
+            "",
+            None,
+            chunk.extension,
+        )
 
     node_ids = set(file_nodes) | set(sym_nodes)
 
     edges = [
-        {"source": s, "target": t, "type": etype}
-        for s, t, etype in sorted(edge_set)
+        {"source": s, "target": t, "type": etype, **(meta or {})}
+        for (s, t, etype), meta in sorted(edge_set.items())
         if s != t and s in node_ids and t in node_ids
     ]
 
     return {
         "repo": repo_label,
+        "version": GRAPH_VERSION,
         "nodes": list(file_nodes.values()) + list(sym_nodes.values()),
         "edges": edges,
     }
