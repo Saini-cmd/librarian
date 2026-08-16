@@ -77,6 +77,7 @@ class FileSummary(Base):
 
 class RepoGraph(Base):
     __tablename__ = "repo_graph"
+    __table_args__ = (UniqueConstraint("repo_hash", name="uq_repo_graph_repo_hash"),)
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     repo_hash: Mapped[str] = mapped_column(
@@ -86,7 +87,6 @@ class RepoGraph(Base):
     graph_json: Mapped[dict] = mapped_column(JSON)
 
     indexed_repo: Mapped["IndexedRepo"] = relationship(back_populates="graphs")
-
 
 class Conversation(Base):
     __tablename__ = "conversations"

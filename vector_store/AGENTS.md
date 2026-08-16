@@ -6,7 +6,7 @@ Qdrant client singleton and vector management. Default is a local Dockerized Qdr
 ## Ownership
 - `qdrant_client.py` — `QdrantManager` singleton resolving `QDRANT_MODE` (server / cloud / embedded)
 - `schema.py` — Named vector config (`text_dense`) and sparse vector config (`text_sparse`)
-- `indexer.py` — `VectorIndexer`: create collection, check existence, upsert points; `delete_points_by_repo_hash` module helper; `scroll_chunks_by_file` module helper (all chunks for one file in a commit via `repo_hash` + `file_path` filter, sorted by line span — used to reconstruct a file's full source)
+- `indexer.py` — `VectorIndexer`: create collection, check existence, upsert points; `delete_points_by_repo_hash` module helper; `scroll_chunks_by_file` module helper (all chunks for one file in a commit via `repo_hash` + `file_path` filter, sorted by line span — used to reconstruct a file's full source). `index()` batches upserts (~8MB payload target, 500-point cap) to stay under Qdrant's 32MB request limit — content-heavy repos (e.g. ripgrep) otherwise fail with a 400 (D21)
 
 ## Local Contracts
 - `QDRANT_MODE=server` (default): connects to `QDRANT_LOCAL_URL` (default `http://localhost:6333`, Dockerized `qdrant/qdrant`)

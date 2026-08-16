@@ -25,3 +25,5 @@ tree-sitter-c-sharp
 tree-sitter-ruby
 arq
 redis
+matplotlib
+weasyprint

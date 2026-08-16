@@ -1,4 +1,5 @@
 from typing import Any
+import json
 
 from qdrant_client.models import (
     FieldCondition,
@@ -11,6 +12,28 @@ from qdrant_client.models import (
 from chunking.chunk_model import CodeChunk
 from .qdrant_client import QdrantManager
 from .schema import VECTOR_NAME, get_vector_params, get_sparse_vector_params
+
+
+# Qdrant rejects requests whose JSON payload exceeds 32MB. Batch upserts well
+# under that cap (~8MB target) so content-heavy repos don't trip a 400.
+_MAX_UPSERT_PAYLOAD_BYTES = 8 * 1024 * 1024
+_MAX_UPSERT_POINTS = 500
+_POINT_OVERHEAD_BYTES = 128
+
+
+def _batch_points(points: list[PointStruct]):
+    """Yield ``points`` in batches bounded by payload size and point count."""
+    batch: list[PointStruct] = []
+    batch_bytes = 0
+    for point in points:
+        point_bytes = len(json.dumps(point.payload, default=str)) + _POINT_OVERHEAD_BYTES
+        if batch and (len(batch) >= _MAX_UPSERT_POINTS or batch_bytes + point_bytes > _MAX_UPSERT_PAYLOAD_BYTES):
+            yield batch
+            batch, batch_bytes = [], 0
+        batch.append(point)
+        batch_bytes += point_bytes
+    if batch:
+        yield batch
 
 
 class VectorIndexer:
@@ -67,12 +90,18 @@ class VectorIndexer:
             for chunk, embedding in zip(chunks, embeddings)
         ]
 
-        self.qdrant.upsert(
-            collection_name=self.collection_name,
-            points=points
-        )
+        total_batches = 0
+        for batch in _batch_points(points):
+            self.qdrant.upsert(
+                collection_name=self.collection_name,
+                points=batch,
+            )
+            total_batches += 1
 
-        print(f"[VectorIndexer] Indexed {len(points)} chunks")
+        print(
+            f"[VectorIndexer] Indexed {len(points)} chunks "
+            f"(in {total_batches} upsert batch{'es' if total_batches != 1 else ''})"
+        )
 
 
     def delete_by_repo_hash(

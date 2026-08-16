@@ -3,6 +3,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from sqlalchemy import and_, or_
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from backend.database import SessionLocal
@@ -73,10 +74,22 @@ def upsert_user(db: Session, clerk_id: str, **fields: Any) -> User:
     if user is None:
         user = User(clerk_id=clerk_id, **fields)
         db.add(user)
+        try:
+            db.commit()
+        except IntegrityError:
+            # Concurrent first-upsert for the same clerk_id: the other request
+            # won the INSERT. Roll back and adopt its row instead of 500ing.
+            db.rollback()
+            user = get_user_by_clerk_id(db, clerk_id)
+            if user is None:
+                raise
+            for key, value in fields.items():
+                setattr(user, key, value)
+            db.commit()
     else:
         for key, value in fields.items():
             setattr(user, key, value)
-    db.commit()
+        db.commit()
     db.refresh(user)
     return user
 
@@ -104,6 +117,16 @@ def get_or_create_indexed_repo(
             status=status,
         )
         db.add(repo)
+        try:
+            db.commit()
+        except IntegrityError:
+            # Another pipeline indexed the same commit first — adopt its row
+            # (do not overwrite: the winner may still be mid-ingest, status
+            # 'indexing', and counts are finalized when its pipeline lands).
+            db.rollback()
+            repo = db.query(IndexedRepo).filter(IndexedRepo.repo_hash == repo_hash).first()
+            if repo is None:
+                raise
     else:
         repo.repo_name = repo_name
         repo.repo_url = repo_url
@@ -126,15 +149,19 @@ def ensure_repo_indexing(repo_hash: str, repo_name: str, repo_url: str) -> None:
     db = SessionLocal()
     try:
         if db.query(IndexedRepo).filter(IndexedRepo.repo_hash == repo_hash).first() is None:
-            db.add(
-                IndexedRepo(
-                    repo_hash=repo_hash,
-                    repo_name=repo_name,
-                    repo_url=repo_url,
-                    status="indexing",
+            try:
+                db.add(
+                    IndexedRepo(
+                        repo_hash=repo_hash,
+                        repo_name=repo_name,
+                        repo_url=repo_url,
+                        status="indexing",
+                    )
                 )
-            )
-            db.commit()
+                db.commit()
+            except IntegrityError:
+                # Concurrent pipeline already created the 'indexing' row.
+                db.rollback()
     finally:
         db.close()
 
@@ -358,6 +385,18 @@ def save_conversation_summary(
             last_message_id=last_message_id,
         )
         db.add(row)
+        try:
+            db.commit()
+        except IntegrityError:
+            # Concurrent rollup for the same conversation won the INSERT — merge into it.
+            db.rollback()
+            row = load_conversation_summary(db, conversation_id)
+            if row is None:
+                raise
+            row.summary_content = summary_content
+            row.total_tokens_covered = total_tokens_covered
+            row.last_message_id = last_message_id
+            db.commit()
     else:
         row.summary_content = summary_content
         row.total_tokens_covered = total_tokens_covered
@@ -409,9 +448,18 @@ def save_repo_graph(db: Session, repo_hash: str, graph: dict) -> None:
     if row is None:
         row = RepoGraph(repo_hash=repo_hash, graph_json=graph)
         db.add(row)
+        try:
+            db.commit()
+        except IntegrityError:
+            # Concurrent graph save for the same commit won the INSERT — merge into it.
+            db.rollback()
+            row = db.query(RepoGraph).filter(RepoGraph.repo_hash == repo_hash).first()
+            if row is not None:
+                row.graph_json = graph
+                db.commit()
     else:
         row.graph_json = graph
-    db.commit()
+        db.commit()
 
 
 def load_repo_graph(db: Session, repo_hash: str) -> dict | None:

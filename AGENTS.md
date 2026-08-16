@@ -111,11 +111,13 @@ docker compose down -v               # stop AND wipe all data (Postgres + Qdrant
 
 ```bash
 venv/bin/uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload --reload-exclude 'data/*' --reload-exclude 'frontend/dist/*'   # dev (hot reload)
-venv/bin/uvicorn backend.main:app --host 0.0.0.0 --port 8000             # prod-style
+venv/bin/uvicorn backend.main:app --host 0.0.0.0 --port 8000             # prod-style (single worker)
+venv/bin/uvicorn backend.main:app --host 0.0.0.0 --port 8000 --workers ${WEB_CONCURRENCY:-2}   # multi-worker (prod; NO --reload)
 ```
 
 - Requires infra up (Postgres + Qdrant) — tables auto-create on startup
 - Stop with `Ctrl+C` (or `kill <pid>`)
+- **Multi-worker (`--workers N`)**: per-worker in-process caches multiply memory; Redis must be up (the ingest lock's in-process fallback is single-process-only); Postgres connections = `N × (DB_POOL_SIZE + DB_MAX_OVERFLOW)` — see `SCALE.md`
 
 ### 2b. Background worker — ARQ (chat memory)
 
@@ -171,11 +173,12 @@ curl -X POST http://localhost:8000/api/reset   # wipes Qdrant collection + index
 
 | Path | Purpose |
 |---|---|
-| `backend/` | FastAPI server — REST API for repo ingestion, chat, users, conversations, repos, and **sync/diff**; repo identity = normalized `repo_url` + per-commit `repo_hash`; PostgreSQL-backed state (sync SQLAlchemy, 8 tables; schema in `DB_SCHEMA.md`) |
+| `backend/` | FastAPI server — REST API for repo ingestion, chat, users, conversations, repos, and **sync/diff**; repo identity = normalized `repo_url` + per-commit `repo_hash`; PostgreSQL-backed state (sync SQLAlchemy, 8 tables; schema in `DB_SCHEMA.md`); **concurrent ingest serialized per commit via a Redis lock with wait-and-reuse** (`ingest_lock.py`) |
 | `chunking/` | Semantic code chunking (AST + text) — no pickle, no summaries |
 | `embedding/` | Embedding pipeline — vectorize chunks via OpenRouter API and upsert to Qdrant |
 | `frontend/` | React 18 SPA — daisyUI 5 + Tailwind CSS 4, brutalist dark theme, router-based pages (Landing, App, Settings), Axios API client with Clerk auth |
 | `ingestion/` | Git clone (shallow, depth=1) + file scanning for downstream chunking |
+| `evaluation/` | URL-driven, repeatable RAG evaluation harness — per-repo golden sets, 4 pipeline setups (S1–S4), 6 metrics (Context Recall/Precision, MRR, Recall@K, Faithfulness, Answer Relevance), academic-style HTML/MD/JSON reports; key decisions in `DECISIONS.md` |
 | `memory/` | Chat memory — short-term history assembly (`short_term.py`) + long-term Qdrant `long_term_memory` store (`store.py`) + ARQ background worker (`worker.py`) |
 | `orchestration/` | Pipeline orchestrator — clone → scan → **summarize ∥ (chunk → embed)** → graph → cleanup |
 | `rag/` | Answer generation — context building, prompt construction, LLM (DeepSeek via ChatOpenAI) |
@@ -196,10 +199,13 @@ curl -X POST http://localhost:8000/api/reset   # wipes Qdrant collection + index
 | `.env` | Backend env file — all backend secrets/config (model APIs, infra, Clerk). Not tracked; loaded via `load_dotenv()` from the repo root. Schema documented in `.env.example` |
 | `frontend/.env` | Frontend env file — `VITE_*` vars for Vite (e.g. `VITE_CLERK_PUBLISHABLE_KEY`); not tracked, read by Vite from the frontend dir |
 | `DB_SCHEMA.md` | Working reference for the Postgres data model (8 tables) — not durable code |
+| `DECISIONS.md` | Key-decisions log for the evaluation system (running record; kept current by `evaluation/AGENTS.md`) |
 | `TODO.md` | Task tracker — remaining sync-feature work + side tasks; schema/identity reference lives in `DB_SCHEMA.md` |
 | `PLAN.md` | Working implementation plan for symbol-graph correctness across all languages (phases + decisions); not durable code |
 | `dev.sh` | Dev startup script — convenience only |
 | `START_STOP.md` | Plain-language manual start/stop command sequence + GUI tool info — convenience only |
+| `SCALE.md` | Concurrency & scaling notes — multi-worker uvicorn, per-worker vs shared state, Postgres connection math, concurrency knobs |
+| `PRODUCTION.md` | Managed-infra & HA deploy notes — compose.prod.yml, managed Qdrant/Postgres/Redis, backups, health checks, production env |
 | `.agents/` | Agent skills and configurations (installed by `npx skills`) |
 
 ### Root-Owned Durable Config
@@ -207,5 +213,7 @@ curl -X POST http://localhost:8000/api/reset   # wipes Qdrant collection + index
 | Path | Purpose |
 |---|---|
 | `docker-compose.yml` | Local infra — `qdrant` (port 6333) + `postgres` (port 5432) services, named volumes; opt-in `tools` profile adds `adminer` (port 8080) |
+| `compose.prod.yml` | Production/self-hosted infra — same services with healthchecks, restart policies, resource hints (see `PRODUCTION.md`) |
 | `.env.example` | Documents every required env key (model APIs, local infra, Clerk) |
+| `prompts.py` | **Single source of truth for every LLM prompt template** (system + user text, D32): RAG answer generation, file summarization, chat-memory rollups, node explanation, eval judges, golden-set paraphrase. Consumers (`rag/`, `summarization/`, `memory/`, `backend/routers`, `evaluation/`) import from here; keep prompt text in this file only |
 

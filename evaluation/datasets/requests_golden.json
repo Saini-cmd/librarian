@@ -1,0 +1,134 @@
+[
+  {
+    "id": "requests-1",
+    "query": "How can I find an available character detection library to use, preferring one of a few known options?",
+    "repo_hash": "8068356288978c4f54661ae6f95afe0e0831885e",
+    "file_path": "src/requests/compat.py",
+    "start_line": 36,
+    "end_line": 45,
+    "symbol": "_resolve_char_detection",
+    "qualified_name": "_resolve_char_detection",
+    "language": "python"
+  },
+  {
+    "id": "requests-2",
+    "query": "What options can I use to customize an HTTP request\u2019s query parameters, body, headers, cookies, file uploads, and authentication?",
+    "repo_hash": "8068356288978c4f54661ae6f95afe0e0831885e",
+    "file_path": "src/requests/api.py",
+    "start_line": 24,
+    "end_line": 43,
+    "symbol": "request",
+    "qualified_name": "request",
+    "language": "python"
+  },
+  {
+    "id": "requests-3",
+    "query": "How do I convert a bytes-like input into a native string using ASCII (or another encoding) when it might already be a string?",
+    "repo_hash": "8068356288978c4f54661ae6f95afe0e0831885e",
+    "file_path": "src/requests/_internal_utils.py",
+    "start_line": 26,
+    "end_line": 36,
+    "symbol": "to_native_string",
+    "qualified_name": "to_native_string",
+    "language": "python"
+  },
+  {
+    "id": "requests-4",
+    "query": "How do I adapt a requests request to the standard library's cookie jar interface, including respecting a custom Host header when reconstructing the URL?",
+    "repo_hash": "8068356288978c4f54661ae6f95afe0e0831885e",
+    "file_path": "src/requests/cookies.py",
+    "start_line": 31,
+    "end_line": 82,
+    "symbol": "MockRequest",
+    "qualified_name": "MockRequest",
+    "language": "python"
+  },
+  {
+    "id": "requests-5",
+    "query": "When handling a request error, how does the exception automatically infer the request from the response object if it wasn't explicitly provided?",
+    "repo_hash": "8068356288978c4f54661ae6f95afe0e0831885e",
+    "file_path": "src/requests/exceptions.py",
+    "start_line": 20,
+    "end_line": 35,
+    "symbol": "RequestException",
+    "qualified_name": "RequestException",
+    "language": "python"
+  },
+  {
+    "id": "requests-6",
+    "query": "How do I construct the Basic Auth header value from a username and password, including handling for non-string inputs?",
+    "repo_hash": "8068356288978c4f54661ae6f95afe0e0831885e",
+    "file_path": "src/requests/auth.py",
+    "start_line": 34,
+    "end_line": 75,
+    "symbol": "_basic_auth_str",
+    "qualified_name": "_basic_auth_str",
+    "language": "python"
+  },
+  {
+    "id": "requests-7",
+    "query": "How are all hooks for a given event applied to a response, and how does a hook's return value affect the final response?",
+    "repo_hash": "8068356288978c4f54661ae6f95afe0e0831885e",
+    "file_path": "src/requests/hooks.py",
+    "start_line": 32,
+    "end_line": 48,
+    "symbol": "dispatch_hook",
+    "qualified_name": "dispatch_hook",
+    "language": "python"
+  },
+  {
+    "id": "requests-8",
+    "query": "How can I check whether an object supports reading, even if it relies on dynamic attribute proxies?",
+    "repo_hash": "8068356288978c4f54661ae6f95afe0e0831885e",
+    "file_path": "src/requests/_types.py",
+    "start_line": 32,
+    "end_line": 34,
+    "symbol": "has_read",
+    "qualified_name": "has_read",
+    "language": "python"
+  },
+  {
+    "id": "requests-9",
+    "query": "How are the SSL verification settings and client certificate options converted into the arguments used for the connection pool?",
+    "repo_hash": "8068356288978c4f54661ae6f95afe0e0831885e",
+    "file_path": "src/requests/adapters.py",
+    "start_line": 85,
+    "end_line": 119,
+    "symbol": "_urllib3_request_context",
+    "qualified_name": "_urllib3_request_context",
+    "language": "python"
+  },
+  {
+    "id": "requests-10",
+    "query": "How can I define a syntax highlighting theme that gives keywords a bold dark-blue color, comments a slanted green tone, and operators a dark brown color?",
+    "repo_hash": "8068356288978c4f54661ae6f95afe0e0831885e",
+    "file_path": "docs/_themes/flask_theme_support.py",
+    "start_line": 7,
+    "end_line": 37,
+    "symbol": "FlaskyStyle",
+    "qualified_name": "FlaskyStyle",
+    "language": "python"
+  },
+  {
+    "id": "requests-11",
+    "query": "What dependency version ranges are enforced for urllib3 and the character encoding detection libraries?",
+    "repo_hash": "8068356288978c4f54661ae6f95afe0e0831885e",
+    "file_path": "src/requests/__init__.py",
+    "start_line": 60,
+    "end_line": 92,
+    "symbol": "check_compatibility",
+    "qualified_name": "check_compatibility",
+    "language": "python"
+  },
+  {
+    "id": "requests-12",
+    "query": "How can I get the name and version of the Python interpreter currently running in my environment?",
+    "repo_hash": "8068356288978c4f54661ae6f95afe0e0831885e",
+    "file_path": "src/requests/help.py",
+    "start_line": 35,
+    "end_line": 64,
+    "symbol": "_implementation",
+    "qualified_name": "_implementation",
+    "language": "python"
+  }
+]

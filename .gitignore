@@ -12,6 +12,7 @@ data/chunks/
 data/repos/
 data/summaries/
 data/responses/
+data/eval_reports/
 qdrant_db/
 qdrant_storage/
 postgres_data/

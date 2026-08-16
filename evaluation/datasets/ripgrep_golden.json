@@ -1,0 +1,123 @@
+[
+  {
+    "id": "ripgrep-1",
+    "query": "What information is contained in an error that occurs during command processing?",
+    "repo_hash": "3fce3b5bb0236da2df6d99672afb8a719642eca7",
+    "file_path": "crates/cli/src/process.rs",
+    "start_line": 11,
+    "end_line": 13,
+    "symbol": "CommandError",
+    "qualified_name": "CommandError",
+    "language": "rust"
+  },
+  {
+    "id": "ripgrep-2",
+    "query": "How can I detect whether standard input is likely piped or redirected (rather than an interactive terminal) across Unix and Windows?",
+    "repo_hash": "3fce3b5bb0236da2df6d99672afb8a719642eca7",
+    "file_path": "crates/cli/src/lib.rs",
+    "start_line": 170,
+    "end_line": 221,
+    "symbol": "is_readable_stdin",
+    "qualified_name": "is_readable_stdin",
+    "language": "rust"
+  },
+  {
+    "id": "ripgrep-3",
+    "query": "What determines whether console output is line-buffered or block-buffered?",
+    "repo_hash": "3fce3b5bb0236da2df6d99672afb8a719642eca7",
+    "file_path": "crates/cli/src/wtr.rs",
+    "start_line": 23,
+    "end_line": 29,
+    "symbol": "stdout",
+    "qualified_name": "stdout",
+    "language": "rust"
+  },
+  {
+    "id": "ripgrep-4",
+    "query": "How do I produce the bash completion script that enumerates every flag along with its short and negated forms and any documented choice values?",
+    "repo_hash": "3fce3b5bb0236da2df6d99672afb8a719642eca7",
+    "file_path": "crates/core/flags/complete/bash.rs",
+    "start_line": 63,
+    "end_line": 107,
+    "symbol": "generate",
+    "qualified_name": "generate",
+    "language": "rust"
+  },
+  {
+    "id": "ripgrep-5",
+    "query": "What information does the error type carry when a pattern cannot be parsed, and how is it structured?",
+    "repo_hash": "3fce3b5bb0236da2df6d99672afb8a719642eca7",
+    "file_path": "crates/cli/src/pattern.rs",
+    "start_line": 12,
+    "end_line": 15,
+    "symbol": "InvalidPatternError",
+    "qualified_name": "InvalidPatternError",
+    "language": "rust"
+  },
+  {
+    "id": "ripgrep-6",
+    "query": "How are all the variants of each flag (long, short, and negated) turned into PowerShell completion entries?",
+    "repo_hash": "3fce3b5bb0236da2df6d99672afb8a719642eca7",
+    "file_path": "crates/core/flags/complete/powershell.rs",
+    "start_line": 43,
+    "end_line": 85,
+    "symbol": "generate",
+    "qualified_name": "generate",
+    "language": "rust"
+  },
+  {
+    "id": "ripgrep-7",
+    "query": "How can I get the current machine's name as an OS string, with different implementations for Windows, Unix, and unsupported platforms?",
+    "repo_hash": "3fce3b5bb0236da2df6d99672afb8a719642eca7",
+    "file_path": "crates/cli/src/hostname.rs",
+    "start_line": 16,
+    "end_line": 33,
+    "symbol": "hostname",
+    "qualified_name": "hostname",
+    "language": "rust"
+  },
+  {
+    "id": "ripgrep-8",
+    "query": "What fields does the error type for size parsing contain?",
+    "repo_hash": "3fce3b5bb0236da2df6d99672afb8a719642eca7",
+    "file_path": "crates/cli/src/human.rs",
+    "start_line": 6,
+    "end_line": 9,
+    "symbol": "ParseSizeError",
+    "qualified_name": "ParseSizeError",
+    "language": "rust"
+  },
+  {
+    "id": "ripgrep-9",
+    "query": "What setup steps are performed when this crate is built?",
+    "repo_hash": "3fce3b5bb0236da2df6d99672afb8a719642eca7",
+    "file_path": "build.rs",
+    "start_line": 1,
+    "end_line": 4,
+    "symbol": "main",
+    "qualified_name": "main",
+    "language": "rust"
+  },
+  {
+    "id": "ripgrep-10",
+    "query": "How can I customize which decompression commands are used for different glob patterns, and is there an option to disable the built-in default matching rules?",
+    "repo_hash": "3fce3b5bb0236da2df6d99672afb8a719642eca7",
+    "file_path": "crates/cli/src/decompress.rs",
+    "start_line": 15,
+    "end_line": 20,
+    "symbol": "DecompressionMatcherBuilder",
+    "qualified_name": "DecompressionMatcherBuilder",
+    "language": "rust"
+  },
+  {
+    "id": "ripgrep-11",
+    "query": "How are flag completions assembled for the Fish shell, and how are different completion types like filenames, executables, and encodings handled?",
+    "repo_hash": "3fce3b5bb0236da2df6d99672afb8a719642eca7",
+    "file_path": "crates/core/flags/complete/fish.rs",
+    "start_line": 13,
+    "end_line": 59,
+    "symbol": "generate",
+    "qualified_name": "generate",
+    "language": "rust"
+  }
+]

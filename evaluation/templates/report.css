@@ -1,0 +1,149 @@
+/* Evaluation report — academic journal styling */
+
+:root {
+  --ink: #1a1a1a;
+  --muted: #555555;
+  --rule: #d5d5d5;
+  --accent: #4c78a8;
+  --bg: #ffffff;
+  --band: #f6f6f4;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: #ecebe9;
+  color: var(--ink);
+  font-family: "Source Sans 3", "Segoe UI", system-ui, -apple-system, sans-serif;
+  font-size: 15px;
+  line-height: 1.55;
+}
+
+.paper {
+  max-width: 980px;
+  margin: 32px auto;
+  padding: 56px 64px 40px;
+  background: var(--bg);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
+}
+
+/* Title block */
+.title-block {
+  border-bottom: 3px solid var(--ink);
+  padding-bottom: 24px;
+  margin-bottom: 28px;
+}
+.kicker {
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  font-size: 12px;
+  color: var(--muted);
+  margin: 0 0 6px;
+}
+h1 {
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 34px;
+  font-weight: 600;
+  margin: 0 0 4px;
+}
+.subtitle { margin: 0 0 14px; color: var(--muted); }
+.subtitle a { color: var(--accent); text-decoration: none; }
+.subtitle a:hover { text-decoration: underline; }
+
+.meta-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 22px;
+  font-size: 13px;
+  color: var(--muted);
+  margin-bottom: 16px;
+}
+.mono { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; font-size: 0.92em; }
+
+/* Headings */
+h2 {
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 22px;
+  font-weight: 600;
+  margin: 34px 0 12px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--rule);
+}
+h3 { font-size: 16px; margin: 24px 0 8px; }
+
+.section { margin-top: 8px; }
+p { margin: 0 0 14px; }
+
+/* Tables */
+.table-wrap {
+  overflow-x: auto;
+  margin: 14px 0 20px;
+  -webkit-overflow-scrolling: touch;
+}
+.table-wrap table {
+  margin: 0;
+}
+table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 14px 0 20px;
+  font-size: 13.5px;
+}
+th, td {
+  border: 1px solid var(--rule);
+  padding: 8px 10px;
+  text-align: left;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+thead th {
+  background: var(--band);
+  font-weight: 600;
+  border-bottom: 2px solid var(--ink);
+}
+table.config { max-width: 420px; }
+table.wide th small { font-weight: 400; color: var(--muted); }
+
+/* Metric legend */
+.legend .note,
+p.note {
+  font-size: 12.5px;
+  color: var(--muted);
+  margin-top: 6px;
+}
+
+/* Figures */
+figure {
+  margin: 20px 0 24px;
+  text-align: center;
+}
+figure img {
+  max-width: 100%;
+  height: auto;
+  border: 1px solid var(--rule);
+}
+figcaption {
+  font-size: 12.5px;
+  color: var(--muted);
+  margin-top: 6px;
+}
+
+ul { margin: 0 0 14px; padding-left: 22px; }
+
+/* Footer */
+.footer {
+  margin-top: 40px;
+  padding-top: 14px;
+  border-top: 1px solid var(--rule);
+  font-size: 12px;
+  color: var(--muted);
+}
+
+@media print {
+  body { background: #fff; }
+  .paper { box-shadow: none; margin: 0; max-width: none; }
+  .table-wrap { overflow: visible; }
+  figure { break-inside: avoid; }
+  tr { break-inside: avoid; }
+}

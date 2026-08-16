@@ -2,23 +2,27 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import threading
 import uuid
 from contextlib import asynccontextmanager
 from dataclasses import asdict
 from functools import lru_cache
-from queue import Empty, Queue
-from typing import Any
+from queue import Queue
+from typing import Any, Iterator
 
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from backend.auth import get_current_user, get_current_user_optional
 from backend.database import SessionLocal, get_db, init_db
+from backend.ingest_lock import GlobalIngestGate, IngestLock, start_lock_heartbeat
 from backend.routers import conversations, repositories, users
+from backend.sse import sse, sse_response, stream_queue
 from backend.state import (
     add_message,
     collection_exists,
@@ -42,25 +46,44 @@ from rag.context_builder import ContextBuilder
 from rag.llm_client import LLMClient
 from rag.prompt_builder import PromptBuilder
 from retrieval.retrieval_pipeline import RetrievalPipeline
+from vector_store.qdrant_client import QdrantManager
 
 
 logger = logging.getLogger(__name__)
 
 
-def _sse(data: dict) -> str:
-    return f"data: {json.dumps(data)}\n\n"
+WAITING_SSE = {
+    "type": "progress",
+    "stage": "waiting",
+    "progress": 5,
+    "message": "Another user is indexing this repository — waiting for it to finish…",
+}
 
 
-def _sse_response(events: list[dict]) -> StreamingResponse:
-    def gen():
-        for event in events:
-            yield _sse(event)
+# FastAPI runs sync `def` endpoints in a thread pool; the pool size is the
+# per-worker chat concurrency ceiling. Env-tunable (default 40, FastAPI's default).
+THREADPOOL_SIZE = int(os.getenv("THREADPOOL_SIZE", "40"))
 
-    return StreamingResponse(gen(), media_type="text/event-stream")
+# Comma-separated allowed origins (dev defaults are the Vite dev servers).
+CORS_ORIGINS = [
+    origin.strip()
+    for origin in os.getenv(
+        "CORS_ORIGINS",
+        "http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174",
+    ).split(",")
+    if origin.strip()
+]
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    try:
+        import anyio
+
+        limiter = anyio.to_thread.current_default_thread_limiter()
+        limiter.total_tokens = THREADPOOL_SIZE
+    except Exception:
+        logger.warning("Could not set threadpool size to %d", THREADPOOL_SIZE, exc_info=True)
     init_db()
     yield
 
@@ -69,7 +92,7 @@ app = FastAPI(title="Librarian AI API", version="0.3.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:5174"],
+    allow_origins=CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -100,67 +123,132 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
+def _redis_ready() -> bool:
+    import redis
+
+    client = redis.Redis.from_url(
+        os.getenv("REDIS_URL", "redis://localhost:6379/0"),
+        socket_connect_timeout=1,
+        socket_timeout=1,
+    )
+    try:
+        return bool(client.ping())
+    finally:
+        client.close()
+
+
+@app.get("/api/ready")
+def readiness() -> JSONResponse:
+    """Readiness probe for orchestrators/load balancers.
+
+    200 only when Postgres, Qdrant, and Redis are all reachable; otherwise 503
+    with a per-dependency check map. `/api/health` remains the no-dependency
+    liveness probe.
+    """
+    checks: dict[str, bool] = {}
+
+    db = SessionLocal()
+    try:
+        db.execute(text("SELECT 1"))
+        checks["postgres"] = True
+    except Exception:
+        checks["postgres"] = False
+    finally:
+        db.close()
+
+    try:
+        QdrantManager().get_client().get_collections()
+        checks["qdrant"] = True
+    except Exception:
+        checks["qdrant"] = False
+
+    try:
+        checks["redis"] = _redis_ready()
+    except Exception:
+        checks["redis"] = False
+
+    ready = all(checks.values())
+    return JSONResponse(
+        {"status": "ok" if ready else "degraded", "checks": checks},
+        status_code=200 if ready else 503,
+    )
+
+
 @app.post("/api/reset")
-def reset_database(db: Session = Depends(get_db)) -> dict[str, str]:
+def reset_database(
+    clerk_id: str = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict[str, str]:
     reset_index_state(db, wipe=True)
     return {"status": "reset", "message": "All data has been wiped."}
 
 
-@app.post("/api/process")
-def process_repository(
-    payload: ProcessRequest,
-    clerk_id: str = Depends(get_current_user),
-) -> StreamingResponse:
-    """Ingest a repo, streaming progress via SSE.
+def _repo_ready(db: Session, repo_hash: str) -> object | None:
+    """The indexed_repo row if it is genuinely usable (status='indexed')."""
+    repo = indexed_repo_by_hash(db, repo_hash)
+    return repo if repo is not None and repo.status == "indexed" else None
 
-    Probe-first: if the remote HEAD is already indexed (globally), skip the
-    pipeline and open a conversation on that commit. Otherwise the pipeline runs
-    in a background thread and emits `progress` events until a final `result`
-    (or `error`) event.
-    """
+
+def _repo_indexed(repo_hash: str) -> bool:
+    """True iff a commit's indexed_repo row is usable — short-lived session."""
     db = SessionLocal()
-    repo_url = normalize_repo_url(payload.repo_url)
-    user = upsert_user(db, clerk_id)
-
     try:
-        remote_hash = GitHubAPIFetcher().remote_head_sha(repo_url)
-    except Exception as exc:
+        return _repo_ready(db, repo_hash) is not None
+    finally:
         db.close()
-        raise HTTPException(
-            status_code=502,
-            detail=f"Failed to probe remote repository. Check the URL and GITHUB_TOKEN: {exc}",
-        )
 
-    existing = indexed_repo_by_hash(db, remote_hash)
-    if existing is not None:
+
+def _reuse_result_events(repo_hash: str, clerk_id: str) -> list[dict]:
+    """Open a conversation on an already-indexed commit and build the result event."""
+    db = SessionLocal()
+    try:
+        repo = _repo_ready(db, repo_hash)
+        if repo is None:
+            return [{"type": "error", "error": "Repository is not available.", "done": True}]
         conv = get_or_create_conversation(
             db,
-            user.clerk_id,
-            repo_name=existing.repo_name,
-            repo_hash=existing.repo_hash,
+            clerk_id,
+            repo_name=repo.repo_name,
+            repo_hash=repo.repo_hash,
         )
-        result = {
-            "repo_url": existing.repo_url,
-            "repo_name": existing.repo_name,
-            "repo_hash": existing.repo_hash,
-            "files_discovered": existing.file_count,
-            "chunks_created": existing.chunks_count,
-            "message": "Repository already indexed at this commit.",
-            "conversation_id": str(conv.id),
-        }
+        return [
+            {
+                "type": "result",
+                "result": {
+                    "repo_url": repo.repo_url,
+                    "repo_name": repo.repo_name,
+                    "repo_hash": repo.repo_hash,
+                    "files_discovered": repo.file_count,
+                    "chunks_created": repo.chunks_count,
+                    "message": "Repository already indexed at this commit.",
+                    "conversation_id": str(conv.id),
+                },
+                "done": True,
+            }
+        ]
+    finally:
         db.close()
-        return _sse_response([{"type": "result", "result": result, "done": True}])
-    db.close()
 
-    progress_q: Queue = Queue()
+
+def _run_pipeline(
+    repo_url: str,
+    clerk_id: str,
+    lock: IngestLock,
+    progress_q: Queue,
+    gate: GlobalIngestGate | None = None,
+) -> None:
+    """Run the ingest pipeline in a background thread, releasing the ingest
+    lock (and the global gate slot, if held) on exit."""
 
     def emit(stage: str, percent: int, message: str) -> None:
         progress_q.put({"type": "progress", "stage": stage, "progress": percent, "message": message})
 
     def _run() -> None:
-        db2 = SessionLocal()
+        db2 = None
+        heartbeat_stop = start_lock_heartbeat(lock, gate)
         try:
             result_obj = Orchestrator().run(repo_url, on_progress=emit)
+            db2 = SessionLocal()
             get_or_create_indexed_repo(
                 db2,
                 repo_hash=result_obj.repo_hash,
@@ -174,7 +262,7 @@ def process_repository(
                 save_repo_graph(db2, result_obj.repo_hash, result_obj.graph)
             conv = get_or_create_conversation(
                 db2,
-                user.clerk_id,
+                clerk_id,
                 repo_name=result_obj.repo_name,
                 repo_hash=result_obj.repo_hash,
             )
@@ -197,22 +285,113 @@ def process_repository(
             logger.exception("Pipeline failed for %s", repo_url)
             progress_q.put({"type": "error", "error": str(exc), "done": True})
         finally:
-            db2.close()
+            if db2 is not None:
+                db2.close()
+            heartbeat_stop.set()
+            lock.release()
+            if gate is not None:
+                gate.release()
 
     threading.Thread(target=_run, daemon=True).start()
 
-    def event_stream():
-        while True:
-            try:
-                event = progress_q.get(timeout=10)
-            except Empty:
-                yield ": ping\n\n"
-                continue
-            yield _sse(event)
-            if event.get("done"):
-                break
 
-    return StreamingResponse(event_stream(), media_type="text/event-stream")
+def _process_event_stream(
+    repo_url: str,
+    clerk_id: str,
+    remote_hash: str,
+) -> Iterator[str]:
+    """SSE generator: acquire the ingest lock (or wait-and-reuse), then stream.
+
+    The lock is acquired lazily here (not in the endpoint body) so the request
+    thread never blocks — the holder runs the pipeline in a background thread
+    while the SSE stream drains its queue; a concurrent second caller streams
+    waiting ticks until the commit is indexed or it takes over.
+    """
+    lock = IngestLock()
+    gate = GlobalIngestGate.maybe()
+    gen = lock.wait_for_index(remote_hash, is_ready=lambda: _repo_indexed(remote_hash), gate=gate)
+    try:
+        while True:
+            state = next(gen)
+            if state == "waiting":
+                yield sse(WAITING_SSE)
+    except StopIteration as exc:
+        status = exc.value
+
+    if status == "timeout":
+        yield sse(
+            {
+                "type": "error",
+                "error": "Timed out waiting for another user's ingest to finish. Try again.",
+                "done": True,
+            }
+        )
+        return
+    if status == "ready":
+        for event in _reuse_result_events(remote_hash, clerk_id):
+            yield sse(event)
+        return
+    # "owned": run the pipeline ourselves. The background thread owns the lock
+    # and gate slot until it finishes (released in its finally), so a client
+    # disconnect does not free them mid-pipeline.
+    progress_q: Queue = Queue()
+    _run_pipeline(repo_url, clerk_id, lock, progress_q, gate=gate)
+    yield from stream_queue(progress_q)
+
+
+@app.post("/api/process")
+def process_repository(
+    payload: ProcessRequest,
+    clerk_id: str = Depends(get_current_user),
+) -> StreamingResponse:
+    """Ingest a repo, streaming progress via SSE.
+
+    Probe-first + wait-and-reuse: if the remote HEAD is already indexed
+    (globally, status='indexed') the pipeline is skipped and a conversation is
+    opened on that commit. Otherwise the caller takes the ingest lock for that
+    commit: the holder runs the pipeline in a background thread (SSE `progress`
+    events until a final `result`/`error`); a second concurrent caller for the
+    same commit streams a `waiting` state until the commit is indexed (reuse) or
+    takes over if the holder gave up.
+    """
+    db = SessionLocal()
+    repo_url = normalize_repo_url(payload.repo_url)
+    user = upsert_user(db, clerk_id)
+
+    try:
+        remote_hash = GitHubAPIFetcher().remote_head_sha(repo_url)
+    except Exception as exc:
+        db.close()
+        raise HTTPException(
+            status_code=502,
+            detail=f"Failed to probe remote repository. Check the URL and GITHUB_TOKEN: {exc}",
+        )
+
+    existing = _repo_ready(db, remote_hash)
+    if existing is not None:
+        conv = get_or_create_conversation(
+            db,
+            user.clerk_id,
+            repo_name=existing.repo_name,
+            repo_hash=existing.repo_hash,
+        )
+        result = {
+            "repo_url": existing.repo_url,
+            "repo_name": existing.repo_name,
+            "repo_hash": existing.repo_hash,
+            "files_discovered": existing.file_count,
+            "chunks_created": existing.chunks_count,
+            "message": "Repository already indexed at this commit.",
+            "conversation_id": str(conv.id),
+        }
+        db.close()
+        return sse_response([{"type": "result", "result": result, "done": True}])
+    db.close()
+
+    return StreamingResponse(
+        _process_event_stream(repo_url, user.clerk_id, remote_hash),
+        media_type="text/event-stream",
+    )
 
 
 @app.post("/api/chat", response_model=ChatResponse)
@@ -290,7 +469,7 @@ def chat_stream(payload: ChatRequest, clerk_id: str = Depends(get_current_user))
     retriever = get_retrieval_pipeline()
     retrieved = retriever.retrieve(payload.message, repo_hash=repo_hash)
 
-    context_builder = ContextBuilder(max_chunks=8, token_budget=14000)
+    context_builder = ContextBuilder()
     prompt_builder = PromptBuilder()
     llm_client = LLMClient()
 

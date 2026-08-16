@@ -1,4 +1,7 @@
 import logging
+import os
+import threading
+from collections import OrderedDict
 from typing import Any
 
 from langchain_community.retrievers import BM25Retriever
@@ -12,18 +15,69 @@ from vector_store.qdrant_client import QdrantManager
 
 logger = logging.getLogger(__name__)
 
+# Bounded per-process cache: at most this many repo BM25 indexes are kept in
+# memory (LRU). Building an index scrolls every chunk of a commit — with many
+# repos, an unbounded cache would leak memory under concurrent chat.
+BM25_CACHE_SIZE = int(os.getenv("BM25_CACHE_SIZE", "16"))
+
 
 class BM25Index:
     """
     BM25 keyword index built from Qdrant payloads using LangChain's BM25Retriever.
+
+    Thread-safe: the shared ``RetrievalPipeline`` singleton serves concurrent
+    requests, so the per-repo index cache is guarded. Builds run under a
+    per-repo lock (different repos build in parallel; the same repo builds
+    once, others wait), and cache reads/writes/LRU eviction run under a short
+    global lock.
     """
 
-    def __init__(self, collection_name: str = "code_chunks", top_k: int = 20):
+    def __init__(
+        self,
+        collection_name: str = "code_chunks",
+        top_k: int = 20,
+        cache_size: int | None = None,
+    ):
         self.collection_name = collection_name
         self.top_k = top_k
         self.client = QdrantManager().get_client()
 
-        self._retrievers: dict[str | None, BM25Retriever | None] = {}
+        self._cache_size = cache_size if cache_size is not None else BM25_CACHE_SIZE
+        self._retrievers: OrderedDict[str | None, BM25Retriever | None] = OrderedDict()
+        self._cache_lock = threading.Lock()
+        self._build_locks: dict[str | None, threading.Lock] = {}
+        self._build_locks_meta = threading.Lock()
+
+    def _build_lock_for(self, repo_hash: str | None) -> threading.Lock:
+        with self._build_locks_meta:
+            lock = self._build_locks.get(repo_hash)
+            if lock is None:
+                lock = threading.Lock()
+                self._build_locks[repo_hash] = lock
+            return lock
+
+    def _get_retriever(self, repo_hash: str | None) -> BM25Retriever | None:
+        with self._cache_lock:
+            if repo_hash in self._retrievers:
+                self._retrievers.move_to_end(repo_hash)
+                return self._retrievers[repo_hash]
+
+        # Not built — build under the per-repo lock so a slow build for one
+        # commit never blocks searches on other commits.
+        with self._build_lock_for(repo_hash):
+            with self._cache_lock:
+                if repo_hash in self._retrievers:  # another thread built it meanwhile
+                    self._retrievers.move_to_end(repo_hash)
+                    return self._retrievers[repo_hash]
+
+            retriever = self._build(repo_hash)
+
+            with self._cache_lock:
+                self._retrievers[repo_hash] = retriever
+                self._retrievers.move_to_end(repo_hash)
+                while len(self._retrievers) > self._cache_size:
+                    self._retrievers.popitem(last=False)
+            return retriever
 
     def search(
         self,
@@ -31,10 +85,7 @@ class BM25Index:
         top_k: int | None = None,
         repo_hash: str | None = None,
     ) -> list[dict[str, Any]]:
-        if repo_hash not in self._retrievers:
-            self._retrievers[repo_hash] = self._build(repo_hash)
-
-        retriever = self._retrievers[repo_hash]
+        retriever = self._get_retriever(repo_hash)
         if retriever is None:
             return []
 

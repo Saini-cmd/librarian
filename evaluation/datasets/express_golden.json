@@ -1,0 +1,189 @@
+[
+  {
+    "id": "express-1",
+    "query": "How do I read a template file and replace a placeholder with the user's name before returning the result?",
+    "repo_hash": "a3714473feb3d2908add734d340e7755fd85e0a3",
+    "file_path": "test/app.engine.js",
+    "start_line": 8,
+    "end_line": 14,
+    "symbol": "render",
+    "qualified_name": "render",
+    "language": "javascript"
+  },
+  {
+    "id": "express-2",
+    "query": "How is the Redis connection established and the search index populated with initial data before the server starts?",
+    "repo_hash": "a3714473feb3d2908add734d340e7755fd85e0a3",
+    "file_path": "examples/search/index.js",
+    "start_line": 29,
+    "end_line": 46,
+    "symbol": "initializeRedis",
+    "qualified_name": "initializeRedis",
+    "language": "javascript"
+  },
+  {
+    "id": "express-3",
+    "query": "Given a media type string with optional quality and parameters, how can I parse it into an object containing the value, quality, and params?",
+    "repo_hash": "a3714473feb3d2908add734d340e7755fd85e0a3",
+    "file_path": "lib/utils.js",
+    "start_line": 89,
+    "end_line": 120,
+    "symbol": "acceptParams",
+    "qualified_name": "acceptParams",
+    "language": "javascript"
+  },
+  {
+    "id": "express-4",
+    "query": "How can I fetch a user by ID in a route middleware and either attach it to the request or pass an error if it doesn't exist?",
+    "repo_hash": "a3714473feb3d2908add734d340e7755fd85e0a3",
+    "file_path": "examples/route-middleware/index.js",
+    "start_line": 25,
+    "end_line": 34,
+    "symbol": "loadUser",
+    "qualified_name": "loadUser",
+    "language": "javascript"
+  },
+  {
+    "id": "express-5",
+    "query": "How does the code ensure that the completion callback fires only once, even when the client aborts the request or the file stream emits multiple events?",
+    "repo_hash": "a3714473feb3d2908add734d340e7755fd85e0a3",
+    "file_path": "lib/response.js",
+    "start_line": 924,
+    "end_line": 994,
+    "symbol": "sendfile",
+    "qualified_name": "sendfile",
+    "language": "javascript"
+  },
+  {
+    "id": "express-6",
+    "query": "How does this code resolve the template engine and file extension when the template name doesn't include an extension, and what errors might it raise?",
+    "repo_hash": "a3714473feb3d2908add734d340e7755fd85e0a3",
+    "file_path": "lib/view.js",
+    "start_line": 52,
+    "end_line": 95,
+    "symbol": "View",
+    "qualified_name": "View",
+    "language": "javascript"
+  },
+  {
+    "id": "express-7",
+    "query": "How can I extract just the cookie name=value pairs from a response's Set-Cookie headers and combine them into a single semicolon-separated string?",
+    "repo_hash": "a3714473feb3d2908add734d340e7755fd85e0a3",
+    "file_path": "test/acceptance/cookie-sessions.js",
+    "start_line": 34,
+    "end_line": 38,
+    "symbol": "getCookies",
+    "qualified_name": "getCookies",
+    "language": "javascript"
+  },
+  {
+    "id": "express-8",
+    "query": "How do I create a view that resolves the correct template engine from the file extension and builds the template path from the configured views root?",
+    "repo_hash": "a3714473feb3d2908add734d340e7755fd85e0a3",
+    "file_path": "examples/view-constructor/github-view.js",
+    "start_line": 23,
+    "end_line": 30,
+    "symbol": "GithubView",
+    "qualified_name": "GithubView",
+    "language": "javascript"
+  },
+  {
+    "id": "express-9",
+    "query": "How can I define a computed, read-only property on an object so that it appears during enumeration and can be redefined later?",
+    "repo_hash": "a3714473feb3d2908add734d340e7755fd85e0a3",
+    "file_path": "lib/request.js",
+    "start_line": 521,
+    "end_line": 527,
+    "symbol": "defineGetter",
+    "qualified_name": "defineGetter",
+    "language": "javascript"
+  },
+  {
+    "id": "express-10",
+    "query": "How can I extract just the cookie name-value pair from the first set-cookie header, ignoring attributes like Path and Expires?",
+    "repo_hash": "a3714473feb3d2908add734d340e7755fd85e0a3",
+    "file_path": "test/acceptance/auth.js",
+    "start_line": 4,
+    "end_line": 6,
+    "symbol": "getCookie",
+    "qualified_name": "getCookie",
+    "language": "javascript"
+  },
+  {
+    "id": "express-11",
+    "query": "Under what condition are errors suppressed from the console output?",
+    "repo_hash": "a3714473feb3d2908add734d340e7755fd85e0a3",
+    "file_path": "lib/application.js",
+    "start_line": 615,
+    "end_line": 618,
+    "symbol": "logerror",
+    "qualified_name": "logerror",
+    "language": "javascript"
+  },
+  {
+    "id": "express-12",
+    "query": "How can I create a reusable request handler that applies content negotiation using configuration loaded from a module?",
+    "repo_hash": "a3714473feb3d2908add734d340e7755fd85e0a3",
+    "file_path": "examples/content-negotiation/index.js",
+    "start_line": 33,
+    "end_line": 38,
+    "symbol": "format",
+    "qualified_name": "format",
+    "language": "javascript"
+  },
+  {
+    "id": "express-13",
+    "query": "How is the main request handler initially set up to support event handling and to expose the application instance on the request and response objects?",
+    "repo_hash": "a3714473feb3d2908add734d340e7755fd85e0a3",
+    "file_path": "lib/express.js",
+    "start_line": 36,
+    "end_line": 56,
+    "symbol": "createApplication",
+    "qualified_name": "createApplication",
+    "language": "javascript"
+  },
+  {
+    "id": "express-14",
+    "query": "What should a function do if it is never supposed to be called?",
+    "repo_hash": "a3714473feb3d2908add734d340e7755fd85e0a3",
+    "file_path": "test/Router.js",
+    "start_line": 463,
+    "end_line": 465,
+    "symbol": "no",
+    "qualified_name": "no",
+    "language": "javascript"
+  },
+  {
+    "id": "express-15",
+    "query": "How can I check whether a given user's species is a ferret?",
+    "repo_hash": "a3714473feb3d2908add734d340e7755fd85e0a3",
+    "file_path": "examples/view-locals/index.js",
+    "start_line": 17,
+    "end_line": 19,
+    "symbol": "ferrets",
+    "qualified_name": "ferrets",
+    "language": "javascript"
+  },
+  {
+    "id": "express-16",
+    "query": "What arguments are expected when creating a new instance of this entity?",
+    "repo_hash": "a3714473feb3d2908add734d340e7755fd85e0a3",
+    "file_path": "examples/view-locals/user.js",
+    "start_line": 7,
+    "end_line": 11,
+    "symbol": "User",
+    "qualified_name": "User",
+    "language": "javascript"
+  },
+  {
+    "id": "express-17",
+    "query": "How can I verify a user's password against the stored salted hash for that username, and return the user object only if it matches?",
+    "repo_hash": "a3714473feb3d2908add734d340e7755fd85e0a3",
+    "file_path": "examples/auth/index.js",
+    "start_line": 60,
+    "end_line": 73,
+    "symbol": "authenticate",
+    "qualified_name": "authenticate",
+    "language": "javascript"
+  }
+]

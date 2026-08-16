@@ -3,7 +3,7 @@ import os
 import time
 from concurrent.futures import ThreadPoolExecutor
 from functools import lru_cache
-from typing import List
+from typing import Callable, List
 
 import requests
 import tiktoken
@@ -77,7 +77,11 @@ class APIEmbedder:
             return text
         return self._tokenizer.decode(tokens[:_FALLBACK_MAX_TOKENS])
 
-    def embed_texts(self, texts: List[str]) -> List[List[float]]:
+    def embed_texts(
+        self,
+        texts: List[str],
+        progress: Callable[[int, int], None] | None = None,
+    ) -> List[List[float]]:
         if not self.api_key:
             raise ValueError("OPENROUTER_API_KEY not set in environment")
 
@@ -93,6 +97,8 @@ class APIEmbedder:
             for i in range(0, len(truncated), EMBED_BATCH_SIZE)
         ]
         if not batches:
+            if progress:
+                progress(0, 0)
             return []
 
         # Fan out per-batch API calls (each batch is independent) across up to
@@ -106,6 +112,8 @@ class APIEmbedder:
             ordered: List[List[List[float]]] = [None] * len(batches)
             for future, i in future_map.items():
                 ordered[i] = future.result()
+                if progress:
+                    progress(i + 1, len(batches))
 
         return [vector for batch in ordered for vector in batch]
 
@@ -148,9 +156,13 @@ class APIEmbedder:
                 f"OpenRouter embedding API error (status={response.status_code}): {response.text[:500]}"
             )
 
-    def embed_chunks(self, chunks: List[CodeChunk]) -> List[List[float]]:
+    def embed_chunks(
+        self,
+        chunks: List[CodeChunk],
+        progress: Callable[[int, int], None] | None = None,
+    ) -> List[List[float]]:
         texts = [self._prepare_text(chunk) for chunk in chunks]
-        return self.embed_texts(texts)
+        return self.embed_texts(texts, progress=progress)
 
     def embed_query(self, query: str) -> List[float]:
         results = self.embed_texts([query])

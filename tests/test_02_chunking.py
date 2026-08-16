@@ -47,7 +47,7 @@ def main():
         print(f"\nProcessing: {repo_url}")
 
         try:
-            files_metadata = ingestion.ingest(repo_url)
+            files_metadata, _repo_dir = ingestion.ingest(repo_url)
             all_chunks = chunker.chunk_repository(files_metadata)
 
             print(f"Total files  : {len(files_metadata)}")

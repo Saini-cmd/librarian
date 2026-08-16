@@ -15,7 +15,7 @@ def main():
 
     for repo_url in REPOS:
         print(f"\nIngesting: {repo_url}")
-        files = ingestion.ingest(repo_url)
+        files, _repo_dir = ingestion.ingest(repo_url)
         print(f"Total files: {len(files)}")
 
 

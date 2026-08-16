@@ -197,28 +197,22 @@ def _format_messages(messages) -> str:
 
 def _summarize(messages, existing_summary: str | None) -> str:
     """Summarize (or merge into) the rolling summary via the shared OpenRouter model."""
+    from prompts import (
+        MEMORY_ROLLUP_FRESH_SYSTEM_PROMPT,
+        MEMORY_ROLLUP_MERGE_SYSTEM_PROMPT,
+        memory_rollup_user_prompt,
+    )
     from rag.llm_client import LLMClient
     from summarization.llm_config import build_summarizer_config
 
     client = LLMClient(build_summarizer_config())
     if existing_summary:
-        system = (
-            "You are a conversation summarizer for a code-assistant chat. "
-            "Merge the EXISTING SUMMARY with the NEW MESSAGES into one concise "
-            "rolling summary (under 150 words). Keep it factual and concrete; "
-            "preserve key technical decisions and unresolved points."
-        )
-        user_content = (
-            f"EXISTING SUMMARY:\n{existing_summary}\n\n"
-            f"NEW MESSAGES:\n{_format_messages(messages)}"
-        )
+        system = MEMORY_ROLLUP_MERGE_SYSTEM_PROMPT
     else:
-        system = (
-            "You are a conversation summarizer for a code-assistant chat. "
-            "Summarize the conversation in under 150 words. Keep it factual and "
-            "concrete; preserve key technical decisions and unresolved points."
-        )
-        user_content = _format_messages(messages)
+        system = MEMORY_ROLLUP_FRESH_SYSTEM_PROMPT
+    user_content = memory_rollup_user_prompt(
+        existing_summary, _format_messages(messages)
+    )
 
     response = client.generate(
         [{"role": "system", "content": system}, {"role": "user", "content": user_content}],

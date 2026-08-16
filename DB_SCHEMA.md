@@ -87,7 +87,7 @@ Working reference doc for the new Postgres data model. Details are being defined
 **Purpose**: Stores the repository dependency/code graph (symbol graph) for an indexed repo (per commit).
 
 **Design notes**:
-- `repo_hash` is a **foreign key** → `indexed_repo.repo_hash`. Graph is scoped to a specific commit of a repo.
+- `repo_hash` is a **foreign key** → `indexed_repo.repo_hash` and **UNIQUE** (`uq_repo_graph_repo_hash`) — one graph per commit. Graph is scoped to a specific commit of a repo.
 - Replaces the current `repo_graphs` table (which was keyed by `repo_name` only, no commit).
 
 | Column | Type (proposed) | Null | Default | Notes |

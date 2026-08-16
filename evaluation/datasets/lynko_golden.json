@@ -1,0 +1,222 @@
+[
+  {
+    "id": "lynko-1",
+    "query": "How can I dynamically set the page title and meta description for a user profile based on the username from the URL?",
+    "repo_hash": "5f5b7e5b0d5b37f5390a4218bc6f49c4b2965ac3",
+    "file_path": "app/[username]/page.js",
+    "start_line": 9,
+    "end_line": 18,
+    "symbol": "generateMetadata",
+    "qualified_name": "generateMetadata",
+    "language": "javascript"
+  },
+  {
+    "id": "lynko-2",
+    "query": "How can I fetch a user's public profile along with their sorted links and design customization by their username?",
+    "repo_hash": "5f5b7e5b0d5b37f5390a4218bc6f49c4b2965ac3",
+    "file_path": "app/api/public/[username]/route.js",
+    "start_line": 7,
+    "end_line": 46,
+    "symbol": "GET",
+    "qualified_name": "GET",
+    "language": "javascript"
+  },
+  {
+    "id": "lynko-3",
+    "query": "How does the save action guard against missing designs and duplicate submissions, and what feedback is shown after a successful save?",
+    "repo_hash": "5f5b7e5b0d5b37f5390a4218bc6f49c4b2965ac3",
+    "file_path": "components/dashboard/Appearance.js",
+    "start_line": 106,
+    "end_line": 127,
+    "symbol": "saveDesign",
+    "qualified_name": "Appearance.saveDesign",
+    "language": "javascript"
+  },
+  {
+    "id": "lynko-4",
+    "query": "How can I fetch all links for the currently logged-in user, sorted by their order, and what happens if the request is unauthenticated?",
+    "repo_hash": "5f5b7e5b0d5b37f5390a4218bc6f49c4b2965ac3",
+    "file_path": "app/api/links/route.js",
+    "start_line": 6,
+    "end_line": 18,
+    "symbol": "GET",
+    "qualified_name": "GET",
+    "language": "javascript"
+  },
+  {
+    "id": "lynko-5",
+    "query": "How is the entire application wrapped with authentication, global font variables, theme, and layout classes for the root HTML/body?",
+    "repo_hash": "5f5b7e5b0d5b37f5390a4218bc6f49c4b2965ac3",
+    "file_path": "app/layout.js",
+    "start_line": 86,
+    "end_line": 112,
+    "symbol": "RootLayout",
+    "qualified_name": "RootLayout",
+    "language": "javascript"
+  },
+  {
+    "id": "lynko-6",
+    "query": "How do I fetch public profile data based on the username in the URL, show a loading screen, and redirect to a 404 page if the user isn't found?",
+    "repo_hash": "5f5b7e5b0d5b37f5390a4218bc6f49c4b2965ac3",
+    "file_path": "components/PreviewWrapper.js",
+    "start_line": 7,
+    "end_line": 49,
+    "symbol": "PublicPage",
+    "qualified_name": "PublicPage",
+    "language": "javascript"
+  },
+  {
+    "id": "lynko-7",
+    "query": "How can I undo all link changes, restore the saved list, and show a confirmation message to the user?",
+    "repo_hash": "5f5b7e5b0d5b37f5390a4218bc6f49c4b2965ac3",
+    "file_path": "components/dashboard/Links.js",
+    "start_line": 215,
+    "end_line": 223,
+    "symbol": "resetLinks",
+    "qualified_name": "Links.resetLinks",
+    "language": "javascript"
+  },
+  {
+    "id": "lynko-8",
+    "query": "What's a reliable way to create a UUID in JavaScript that works even when the Web Crypto API isn't available?",
+    "repo_hash": "5f5b7e5b0d5b37f5390a4218bc6f49c4b2965ac3",
+    "file_path": "lib/uuid.js",
+    "start_line": 1,
+    "end_line": 11,
+    "symbol": "generateUUID",
+    "qualified_name": "generateUUID",
+    "language": "javascript"
+  },
+  {
+    "id": "lynko-9",
+    "query": "How can I verify that a username contains only letters and numbers, with no spaces or special characters?",
+    "repo_hash": "5f5b7e5b0d5b37f5390a4218bc6f49c4b2965ac3",
+    "file_path": "app/api/users/check-username/route.js",
+    "start_line": 4,
+    "end_line": 6,
+    "symbol": "isValid",
+    "qualified_name": "isValid",
+    "language": "javascript"
+  },
+  {
+    "id": "lynko-10",
+    "query": "What happens when a user tries to save a link without filling in the title or URL?",
+    "repo_hash": "5f5b7e5b0d5b37f5390a4218bc6f49c4b2965ac3",
+    "file_path": "components/LinkPair.js",
+    "start_line": 20,
+    "end_line": 36,
+    "symbol": "check",
+    "qualified_name": "LinkPair.check",
+    "language": "javascript"
+  },
+  {
+    "id": "lynko-11",
+    "query": "How does this module prevent creating multiple database connections and reuse an existing one if it\u2019s already connected?",
+    "repo_hash": "5f5b7e5b0d5b37f5390a4218bc6f49c4b2965ac3",
+    "file_path": "lib/mongodb.js",
+    "start_line": 11,
+    "end_line": 22,
+    "symbol": "connectDB",
+    "qualified_name": "connectDB",
+    "language": "javascript"
+  },
+  {
+    "id": "lynko-12",
+    "query": "What happens when an already signed-in user visits the home page?",
+    "repo_hash": "5f5b7e5b0d5b37f5390a4218bc6f49c4b2965ac3",
+    "file_path": "app/page.js",
+    "start_line": 13,
+    "end_line": 36,
+    "symbol": "Home",
+    "qualified_name": "Home",
+    "language": "javascript"
+  },
+  {
+    "id": "lynko-13",
+    "query": "How is the username extracted from the route parameters in this page?",
+    "repo_hash": "5f5b7e5b0d5b37f5390a4218bc6f49c4b2965ac3",
+    "file_path": "app/[username]/page.js",
+    "start_line": 3,
+    "end_line": 7,
+    "symbol": "Page",
+    "qualified_name": "Page",
+    "language": "javascript"
+  },
+  {
+    "id": "lynko-14",
+    "query": "How do I set up the dashboard's main tabbed layout so the Home tab is selected by default, shows a house icon, and renders the corresponding content?",
+    "repo_hash": "5f5b7e5b0d5b37f5390a4218bc6f49c4b2965ac3",
+    "file_path": "components/DashboardContent.js",
+    "start_line": 9,
+    "end_line": 48,
+    "symbol": "DashboardContent",
+    "qualified_name": "DashboardContent",
+    "language": "javascript"
+  },
+  {
+    "id": "lynko-15",
+    "query": "How can I get the current user's design customization, ensuring a default record is created if they don't have one yet?",
+    "repo_hash": "5f5b7e5b0d5b37f5390a4218bc6f49c4b2965ac3",
+    "file_path": "app/api/designs/route.js",
+    "start_line": 18,
+    "end_line": 42,
+    "symbol": "GET",
+    "qualified_name": "GET",
+    "language": "javascript"
+  },
+  {
+    "id": "lynko-16",
+    "query": "How can I retrieve the first file a user selects from a file input and save it to the component's state?",
+    "repo_hash": "5f5b7e5b0d5b37f5390a4218bc6f49c4b2965ac3",
+    "file_path": "components/dashboard/Profile.js",
+    "start_line": 51,
+    "end_line": 56,
+    "symbol": "handleFileSelect",
+    "qualified_name": "Profile.handleFileSelect",
+    "language": "javascript"
+  },
+  {
+    "id": "lynko-17",
+    "query": "How can I fetch the authenticated user's data and return appropriate errors when the user is not authenticated or not found?",
+    "repo_hash": "5f5b7e5b0d5b37f5390a4218bc6f49c4b2965ac3",
+    "file_path": "app/api/users/route.js",
+    "start_line": 7,
+    "end_line": 22,
+    "symbol": "GET",
+    "qualified_name": "GET",
+    "language": "javascript"
+  },
+  {
+    "id": "lynko-18",
+    "query": "How can I generate a random username that is guaranteed not to already exist in the database?",
+    "repo_hash": "5f5b7e5b0d5b37f5390a4218bc6f49c4b2965ac3",
+    "file_path": "app/dashboard/layout.js",
+    "start_line": 8,
+    "end_line": 18,
+    "symbol": "generateUniqueUsername",
+    "qualified_name": "generateUniqueUsername",
+    "language": "javascript"
+  },
+  {
+    "id": "lynko-19",
+    "query": "How can I display a custom 404 page that shows a friendly message and a button linking back to the homepage?",
+    "repo_hash": "5f5b7e5b0d5b37f5390a4218bc6f49c4b2965ac3",
+    "file_path": "app/404/page.js",
+    "start_line": 3,
+    "end_line": 20,
+    "symbol": "NotFoundPage",
+    "qualified_name": "NotFoundPage",
+    "language": "javascript"
+  },
+  {
+    "id": "lynko-20",
+    "query": "How can I update a link by its ID while ensuring it belongs to the authenticated user?",
+    "repo_hash": "5f5b7e5b0d5b37f5390a4218bc6f49c4b2965ac3",
+    "file_path": "app/api/links/[id]/route.js",
+    "start_line": 6,
+    "end_line": 33,
+    "symbol": "PUT",
+    "qualified_name": "PUT",
+    "language": "javascript"
+  }
+]

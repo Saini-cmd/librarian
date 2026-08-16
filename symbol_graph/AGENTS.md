@@ -22,6 +22,7 @@ Builds a symbol graph for an indexed repo from its AST chunks: nodes for files a
 - `uses` edges are emitted from AST entity chunks and from synthesized entities — each synthesized entity scans **its own declaration content** for references (a component's JSX/body), so it gets real outgoing `uses` edges without the whole text chunk's noise; non-entity text chunks still emit `used_in` (file-level) edges only
 - Not cached in-process anymore — graphs are persisted to Postgres (`repo_graphs` via `backend/state.py`) by the orchestrator at ingest time; `GET /graph` reads the DB (lazy fallback builds + persists for pre-existing repos, and rebuilds stored graphs whose `version` is below `GRAPH_VERSION`)
 - Result shape: `{repo, version, nodes, edges}` — `version` is the graph schema version (`GRAPH_VERSION` in `graph_builder.py`); bump it when the graph JSON shape changes so `GET /graph` lazily rebuilds stale persisted graphs
+- **Thread-safety**: `_PARSERS` (the lazily-populated tree-sitter parser cache) is guarded by a lock — `_get_parser` is called from the request path (lazy graph rebuilds) which can run concurrently
 
 ## Work Guidance
 - If AST `node_type` values change in `chunking/ast_config.py`, extend `KIND_MAP`

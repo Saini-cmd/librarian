@@ -2,6 +2,7 @@ import logging
 from typing import Any
 
 from embedding.api_embedder import APIEmbedder
+from rag.types import HybridCandidate
 from reranking.openrouter_reranker import OpenRouterReranker
 from retrieval.bm25_index import BM25Index
 from retrieval.hybrid_retriever import HybridRetriever
@@ -80,12 +81,42 @@ class RetrievalPipeline:
             len(deduped_candidates),
         )
 
-        reranked = self.reranker.rerank(
-            query=query,
-            candidates=deduped_candidates,
-            top_k=max(self.final_top_k * 3, self.final_top_k),
-        )
-        final_results = self.post_processor.dedupe_reranked(reranked, top_k=self.final_top_k)
+        try:
+            reranked = self.reranker.rerank(
+                query=query,
+                candidates=deduped_candidates,
+                top_k=max(self.final_top_k * 3, self.final_top_k),
+            )
+            final_results = self.post_processor.dedupe_reranked(reranked, top_k=self.final_top_k)
+            for item in final_results:
+                item["reranked"] = True
+            logger.info("stage=rerank_ok count=%d", len(final_results))
+        except Exception:
+            logger.warning(
+                "stage=rerank_failed falling_back_to_hybrid candidates=%d",
+                len(deduped_candidates),
+                exc_info=True,
+            )
+            final_results = [
+                self._candidate_to_result(c)
+                for c in deduped_candidates[: self.final_top_k]
+            ]
+            for item in final_results:
+                item["reranked"] = False
 
         logger.info("stage=final_returned count=%d", len(final_results))
         return final_results
+
+    @staticmethod
+    def _candidate_to_result(candidate: HybridCandidate) -> dict[str, Any]:
+        return {
+            "chunk": candidate.chunk,
+            "score": float(
+                candidate.adjusted_score
+                if candidate.adjusted_score is not None
+                else candidate.rrf_score
+            ),
+            "rrf_score": float(candidate.rrf_score),
+            "vector_score": candidate.vector_score,
+            "bm25_score": candidate.bm25_score,
+        }

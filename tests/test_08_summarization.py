@@ -2,8 +2,6 @@ from bootstrap import ensure_repo_root
 
 ensure_repo_root()
 
-from pathlib import Path
-
 from ingestion.github_api_fetcher import GitHubAPIFetcher
 from ingestion.ingestion_pipeline import IngestionPipeline
 from summarization.summarization_pipeline import SummarizationPipeline
@@ -20,11 +18,10 @@ def main():
     summarizer = SummarizationPipeline()
 
     for repo_url in REPOS:
-        name = repo_url.removesuffix(".git").split("/")[-1]
         print(f"\nProcessing: {repo_url}")
 
-        files = ingestion.ingest(repo_url)
-        repo_hash = GitHubAPIFetcher.head_sha(Path("data/repos") / name)
+        files, repo_dir = ingestion.ingest(repo_url)
+        repo_hash = GitHubAPIFetcher.head_sha(repo_dir)
         summaries = summarizer.summarize(files, repo_hash)
 
         print(f"Total files      : {len(files)}")

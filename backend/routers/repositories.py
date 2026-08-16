@@ -2,16 +2,19 @@ import json
 import logging
 import threading
 from datetime import datetime
-from queue import Empty, Queue
+from queue import Queue
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
+from typing import Iterator
 
 from backend.auth import get_current_user
 from backend.database import SessionLocal, get_db
+from backend.ingest_lock import GlobalIngestGate, IngestLock, start_lock_heartbeat
 from backend.models import Conversation, FileSummary, IndexedRepo, RepoGraph
+from backend.sse import sse, sse_response, stream_queue
 from backend.state import (
     COLLECTION_NAME,
     cited_chunk_ids,
@@ -25,6 +28,7 @@ from backend.state import (
 )
 from ingestion.github_api_fetcher import GitHubAPIFetcher
 from orchestration.orchestrator import Orchestrator
+from prompts import EXPLAIN_SYSTEM_PROMPT, explain_user_prompt
 from rag.llm_client import LLMClient
 from rag.types import LLMConfig
 from summarization.summary_store import SummaryStore
@@ -41,17 +45,12 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/repositories", tags=["repositories"])
 
-
-def _sse(data: dict) -> str:
-    return f"data: {json.dumps(data)}\n\n"
-
-
-def _sse_response(events: list[dict]) -> StreamingResponse:
-    def gen():
-        for event in events:
-            yield _sse(event)
-
-    return StreamingResponse(gen(), media_type="text/event-stream")
+WAITING_SSE = {
+    "type": "progress",
+    "stage": "waiting",
+    "progress": 5,
+    "message": "Latest commit is being indexed by another user — waiting for it to finish…",
+}
 
 
 class RepoOut(BaseModel):
@@ -111,6 +110,21 @@ def _require_repo_by_hash(db: Session, clerk_id: str, repo_hash: str) -> Indexed
     return repo
 
 
+# Per-commit rebuild lock: concurrent requests that hit a missing/stale graph
+# build it once; the rest wait and read the persisted result (double-checked).
+_REBUILD_LOCKS: dict[str, threading.Lock] = {}
+_REBUILD_LOCKS_META = threading.Lock()
+
+
+def _rebuild_lock_for(repo_hash: str) -> threading.Lock:
+    with _REBUILD_LOCKS_META:
+        lock = _REBUILD_LOCKS.get(repo_hash)
+        if lock is None:
+            lock = threading.Lock()
+            _REBUILD_LOCKS[repo_hash] = lock
+        return lock
+
+
 def _repo_out(repo: IndexedRepo) -> RepoOut:
     return RepoOut(
         repo_name=repo.repo_name,
@@ -142,8 +156,11 @@ def repo_graph(
     repo = _require_repo_by_hash(db, user.clerk_id, repo_hash)
     graph = load_repo_graph(db, repo.repo_hash)
     if graph is None or graph.get("version", 0) < GRAPH_VERSION:
-        graph = build_repo_graph(repo.repo_hash, repo_label=repo.repo_name)
-        save_repo_graph(db, repo.repo_hash, graph)
+        with _rebuild_lock_for(repo.repo_hash):
+            graph = load_repo_graph(db, repo.repo_hash)
+            if graph is None or graph.get("version", 0) < GRAPH_VERSION:
+                graph = build_repo_graph(repo.repo_hash, repo_label=repo.repo_name)
+                save_repo_graph(db, repo.repo_hash, graph)
     return graph
 
 
@@ -220,15 +237,6 @@ def repo_chunk(
     return ChunkOut(**vars(chunk))
 
 
-EXPLAIN_SYSTEM_PROMPT = (
-    "You are a senior software engineer explaining a single code node. "
-    "Explain it clearly and concisely in markdown: what the code does, how it "
-    "works, its inputs/outputs, and any notable patterns, edge cases, or "
-    "pitfalls. Stay grounded in the provided code — do not invent behavior, "
-    "APIs, or files that are not present. Keep the explanation under 500 words."
-)
-
-
 @router.post("/{repo_hash}/explain")
 def explain_node(
     repo_hash: str,
@@ -244,13 +252,14 @@ def explain_node(
     """
     user = upsert_user(db, clerk_id)
     repo = _require_repo_by_hash(db, user.clerk_id, repo_hash)
-    llm_client = LLMClient(config=LLMConfig(max_tokens=700))
+    llm_client = LLMClient(config=LLMConfig(max_tokens=350))
     loc = f" lines {payload.start_line}-{payload.end_line}" if payload.start_line else ""
-    user_prompt = (
-        f"Code node: {payload.label or payload.kind} ({payload.kind})\n"
-        f"File: {payload.file_path}{loc}\n\n"
-        f"```\n{payload.code}\n```\n\n"
-        "Explain this code."
+    user_prompt = explain_user_prompt(
+        label=payload.label or payload.kind,
+        kind=payload.kind,
+        file_path=payload.file_path,
+        loc=loc,
+        code=payload.code,
     )
     messages = [
         {"role": "system", "content": EXPLAIN_SYSTEM_PROMPT},
@@ -290,44 +299,49 @@ def repo_updates(
     )
 
 
-@router.post("/{repo_hash}/sync")
-def sync_repository(
-    repo_hash: str,
-    clerk_id: str = Depends(get_current_user),
-) -> StreamingResponse:
-    """Sync a repo to its latest remote commit, streaming progress via SSE.
-
-    Re-ingests (or reuses an already-indexed newer commit), re-points the
-    caller's conversations for this repo to the new commit, and tombstones old
-    commits that no conversation references (retaining cited chunks). The heavy
-    work runs in a background thread; `progress` events stream until a final
-    `result` (or `error`) event.
-    """
+def _commit_indexed(repo_hash: str) -> bool:
+    """True iff a commit's indexed_repo row is usable (status='indexed')."""
     db = SessionLocal()
-    repo = _require_repo_by_hash(db, clerk_id, repo_hash)
     try:
-        remote_hash = GitHubAPIFetcher().remote_head_sha(repo.repo_url)
-    except Exception as exc:
+        row = indexed_repo_by_hash(db, repo_hash)
+        return row is not None and row.status == "indexed"
+    finally:
         db.close()
-        raise HTTPException(status_code=502, detail=f"Failed to probe remote repository: {exc}")
 
-    if remote_hash == repo.repo_hash:
-        result = {"status": "up_to_date", "repo_hash": repo.repo_hash}
-        db.close()
-        return _sse_response([{"type": "result", "result": result, "done": True}])
-    db.close()
 
-    progress_q: Queue = Queue()
+def _sync_run(
+    repo: IndexedRepo,
+    remote_hash: str,
+    clerk_id: str,
+    progress_q: Queue,
+    lock: IngestLock | None,
+    gate: GlobalIngestGate | None = None,
+) -> None:
+    """Background sync work: ensure the target commit is indexed (only when we
+    hold the ingest lock + a global gate slot), re-point the caller's
+    conversations, tombstone old commits. Releases the lock/slot when this
+    thread owns them."""
 
     def emit(stage: str, percent: int, message: str) -> None:
         progress_q.put({"type": "progress", "stage": stage, "progress": percent, "message": message})
 
     def _run() -> None:
-        db2 = SessionLocal()
+        db2 = None
+        heartbeat_stop = start_lock_heartbeat(lock, gate) if lock is not None else None
         try:
+            # Only a usable row (status='indexed') can be reused — a 'failed' or
+            # 'indexing' row is re-ingested when we hold the ingest lock.
+            db2 = SessionLocal()
             target = indexed_repo_by_hash(db2, remote_hash)
-            if target is None:
+            usable = target is not None and target.status == "indexed"
+
+            if not usable and lock is not None:
+                # We own the ingest lock: run the pipeline WITHOUT holding a
+                # DB connection for the whole (minutes-long) run.
+                db2.close()
+                db2 = None
                 result_obj = Orchestrator().run(repo.repo_url, on_progress=emit)
+                db2 = SessionLocal()
                 get_or_create_indexed_repo(
                     db2,
                     repo_hash=result_obj.repo_hash,
@@ -342,6 +356,8 @@ def sync_repository(
                 target = indexed_repo_by_hash(db2, result_obj.repo_hash)
                 if target is None:
                     raise RuntimeError("Sync finalized row missing")
+            elif not usable:
+                raise RuntimeError("Target commit became unavailable before sync finalized")
             else:
                 emit("sync", 100, "Latest commit already indexed — updating references")
 
@@ -402,19 +418,86 @@ def sync_repository(
             logger.exception("Sync failed for %s", repo.repo_url)
             progress_q.put({"type": "error", "error": str(exc), "done": True})
         finally:
-            db2.close()
+            if db2 is not None:
+                db2.close()
+            if heartbeat_stop is not None:
+                heartbeat_stop.set()
+            if lock is not None:
+                lock.release()
+            if gate is not None:
+                gate.release()
 
     threading.Thread(target=_run, daemon=True).start()
 
-    def event_stream():
-        while True:
-            try:
-                event = progress_q.get(timeout=10)
-            except Empty:
-                yield ": ping\n\n"
-                continue
-            yield _sse(event)
-            if event.get("done"):
-                break
 
-    return StreamingResponse(event_stream(), media_type="text/event-stream")
+def _sync_event_stream(
+    repo: IndexedRepo,
+    remote_hash: str,
+    clerk_id: str,
+) -> Iterator[str]:
+    """SSE generator: wait for the target commit to be indexed (or take over its
+    ingest), then re-point + tombstone in a background thread and stream."""
+    lock = IngestLock()
+    gate = GlobalIngestGate.maybe()
+    gen = lock.wait_for_index(remote_hash, is_ready=lambda: _commit_indexed(remote_hash), gate=gate)
+    try:
+        while True:
+            state = next(gen)
+            if state == "waiting":
+                yield sse(WAITING_SSE)
+    except StopIteration as exc:
+        status = exc.value
+
+    if status == "timeout":
+        yield sse(
+            {
+                "type": "error",
+                "error": "Timed out waiting for the latest commit to be indexed. Try again.",
+                "done": True,
+            }
+        )
+        return
+
+    progress_q: Queue = Queue()
+    if status == "owned":
+        _sync_run(repo, remote_hash, clerk_id, progress_q, lock=lock, gate=gate)
+    else:
+        _sync_run(repo, remote_hash, clerk_id, progress_q, lock=None)
+    yield from stream_queue(progress_q)
+
+
+@router.post("/{repo_hash}/sync")
+def sync_repository(
+    repo_hash: str,
+    clerk_id: str = Depends(get_current_user),
+) -> StreamingResponse:
+    """Sync a repo to its latest remote commit, streaming progress via SSE.
+
+    Re-ingests (or reuses an already-indexed newer commit), re-points the
+    caller's conversations for this repo to the new commit, and tombstones old
+    commits that no conversation references (retaining cited chunks). The heavy
+    work runs in a background thread; `progress` events stream until a final
+    `result` (or `error`) event.
+
+    Wait-and-reuse: the target commit's ingest is serialized by the ingest
+    lock. If another user is already ingesting the target, this call streams a
+    `waiting` state until the commit is indexed, then re-points + tombstones.
+    """
+    db = SessionLocal()
+    repo = _require_repo_by_hash(db, clerk_id, repo_hash)
+    try:
+        remote_hash = GitHubAPIFetcher().remote_head_sha(repo.repo_url)
+    except Exception as exc:
+        db.close()
+        raise HTTPException(status_code=502, detail=f"Failed to probe remote repository: {exc}")
+
+    if remote_hash == repo.repo_hash:
+        result = {"status": "up_to_date", "repo_hash": repo.repo_hash}
+        db.close()
+        return sse_response([{"type": "result", "result": result, "done": True}])
+    db.close()
+
+    return StreamingResponse(
+        _sync_event_stream(repo, remote_hash, clerk_id),
+        media_type="text/event-stream",
+    )

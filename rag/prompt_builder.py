@@ -1,26 +1,18 @@
 import logging
 
+from prompts import (
+    RAG_CONTEXT_CHUNK_HEADER,
+    RAG_CONTEXT_FILE_HEADER,
+    RAG_CONTEXT_SUMMARY,
+    RAG_MEMORY_GUIDANCE,
+    RAG_SYSTEM_PROMPT,
+    rag_user_prompt,
+)
 from rag.types import ContextAssembly, PromptPayload
 from summarization.summary_store import SummaryStore
 
 
 logger = logging.getLogger(__name__)
-
-
-SYSTEM_PROMPT = """You are a senior software engineer assisting with repository-level code understanding.
-Use only the provided retrieved context.
-If information is missing from context, say so explicitly.
-Prefer code-grounded explanations and concrete references.
-Do not hallucinate APIs, files, or behavior not present in context.
-Respond concisely in technical language.
-When making claims, cite the relevant chunk IDs in square brackets, e.g. [C1], [C2].
-Cite only chunks you actually reference and never invent citations; if an answer needs no grounding, do not cite."""
-
-MEMORY_GUIDANCE = (
-    "The conversation history and long-term memory below provide context about previous "
-    "questions and answers. They are not citable and may reference an earlier version of "
-    "the code — when they conflict with the retrieved context, trust the retrieved context."
-)
 
 
 class PromptBuilder:
@@ -46,9 +38,9 @@ class PromptBuilder:
         context_text = self._format_context(context, summaries)
         memory_texts = memory_texts or []
 
-        system_prompt = SYSTEM_PROMPT
+        system_prompt = RAG_SYSTEM_PROMPT
         if memory_texts:
-            system_prompt = f"{SYSTEM_PROMPT}\n\n{MEMORY_GUIDANCE}"
+            system_prompt = f"{RAG_SYSTEM_PROMPT}\n\n{RAG_MEMORY_GUIDANCE}"
 
         messages: list[dict[str, str]] = [{"role": "system", "content": system_prompt}]
         for turn in history or []:
@@ -57,7 +49,7 @@ class PromptBuilder:
                 continue
             messages.append({"role": role, "content": turn.get("content", "")})
 
-        user_prompt = self._build_user_prompt(repo_hint, context_text, memory_texts, query)
+        user_prompt = rag_user_prompt(repo_hint, context_text, memory_texts, query)
         messages.append({"role": "user", "content": user_prompt})
 
         logger.info(
@@ -75,32 +67,23 @@ class PromptBuilder:
         )
 
     @staticmethod
-    def _build_user_prompt(
-        repo_hint: str,
-        context_text: str,
-        memory_texts: list[str],
-        query: str,
-    ) -> str:
-        parts = [f"Repository scope: {repo_hint}"]
-        if memory_texts:
-            parts.append("Long-term memory:\n" + "\n\n".join(memory_texts))
-        parts.append("Retrieved context:\n" + context_text)
-        parts.append(f"User query:\n{query}")
-        return "\n\n".join(parts)
-
-    @staticmethod
     def _format_context(context: ContextAssembly, summaries: dict[str, str] | None = None) -> str:
         lines: list[str] = []
         for file_path, items in context.grouped_by_file.items():
-            lines.append(f"## File: {file_path}")
+            lines.append(RAG_CONTEXT_FILE_HEADER.format(file_path=file_path))
             summary = (summaries or {}).get(file_path)
             if summary:
-                lines.append(f"Summary: {summary}")
+                lines.append(RAG_CONTEXT_SUMMARY.format(summary=summary))
             for item in items:
                 chunk = item.chunk
                 lines.append(
-                    f"[{item.citation_id}] symbol={chunk.symbol or '-'} "
-                    f"lang={chunk.language} lines={chunk.start_line}-{chunk.end_line}"
+                    RAG_CONTEXT_CHUNK_HEADER.format(
+                        citation_id=item.citation_id,
+                        symbol=chunk.symbol or "-",
+                        language=chunk.language,
+                        start_line=chunk.start_line,
+                        end_line=chunk.end_line,
+                    )
                 )
                 lines.append(chunk.content)
                 lines.append("")

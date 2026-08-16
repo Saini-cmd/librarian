@@ -1,5 +1,6 @@
 import logging
 import os
+import time
 
 import requests
 from dotenv import load_dotenv
@@ -13,6 +14,10 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 
 OPENROUTER_RERANK_URL = "https://openrouter.ai/api/v1/rerank"
+
+_RETRYABLE_STATUSES = {429, 500, 502, 503, 504}
+_MAX_RETRIES = 3
+_RETRY_BASE_DELAY = 1.0
 
 
 class OpenRouterReranker:
@@ -67,13 +72,33 @@ class OpenRouterReranker:
             "top_n": top_n,
         }
 
-        response = requests.post(
-            OPENROUTER_RERANK_URL,
-            headers=headers,
-            json=payload,
-            timeout=60,
-        )
-        response.raise_for_status()
-        data = response.json()
+        for attempt in range(_MAX_RETRIES):
+            response = requests.post(
+                OPENROUTER_RERANK_URL,
+                headers=headers,
+                json=payload,
+                timeout=60,
+            )
 
-        return data.get("results", [])
+            if response.status_code == 200:
+                data = response.json()
+                return data.get("results", [])
+
+            if (
+                response.status_code in _RETRYABLE_STATUSES
+                and attempt < _MAX_RETRIES - 1
+            ):
+                delay = _RETRY_BASE_DELAY * (2 ** attempt)
+                logger.warning(
+                    "rerank retry %d/%d after status=%d in %ss",
+                    attempt + 1,
+                    _MAX_RETRIES,
+                    response.status_code,
+                    delay,
+                )
+                time.sleep(delay)
+                continue
+
+            response.raise_for_status()
+
+        return []

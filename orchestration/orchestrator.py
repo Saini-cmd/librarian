@@ -51,11 +51,10 @@ class Orchestrator:
         logger.info("Starting pipeline for %s", repo_url)
 
         progress("ingest", 5, "Cloning & scanning repository...")
-        files = self.ingestion.ingest(repo_url)
+        files, repo_dir = self.ingestion.ingest(repo_url)
         logger.info("Ingested %d files", len(files))
         progress("scan", 15, f"Discovered {len(files)} files")
 
-        repo_dir = Path("data/repos") / repo_name
         repo_hash = None
         chunks: list = []
         try:

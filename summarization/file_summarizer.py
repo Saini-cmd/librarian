@@ -1,18 +1,12 @@
 import tiktoken
 
+from prompts import FILE_SUMMARIZATION_SYSTEM_PROMPT, file_summarization_user_prompt
 from rag.llm_client import LLMClient
 from summarization.llm_config import build_summarizer_config
 
 
 _ENCODING = "cl100k_base"
 _MAX_FILE_TOKENS = 3000
-
-
-_SUMMARIZATION_SYSTEM_PROMPT = (
-    "You are a code analyst. Summarize the given code file in 100 words or fewer. "
-    "Describe its purpose, main exports/classes/functions, and its role in the codebase. "
-    "Be concise and technical."
-)
 
 
 class FileSummarizer:
@@ -27,14 +21,10 @@ class FileSummarizer:
             return ""
 
         messages = [
-            {"role": "system", "content": _SUMMARIZATION_SYSTEM_PROMPT},
+            {"role": "system", "content": FILE_SUMMARIZATION_SYSTEM_PROMPT},
             {
                 "role": "user",
-                "content": (
-                    f"Language: {language}\n"
-                    f"File: {file_path}\n\n"
-                    f"```{language}\n{content}\n```"
-                ),
+                "content": file_summarization_user_prompt(language, file_path, content),
             },
         ]
 

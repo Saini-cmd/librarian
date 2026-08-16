@@ -2,6 +2,7 @@ import logging
 import os
 import shutil
 import subprocess
+import uuid
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -17,16 +18,16 @@ class GitHubAPIFetcher:
         self.base_dir.mkdir(parents=True, exist_ok=True)
         self.token = token or os.getenv("GITHUB_TOKEN")
 
-    def fetch_repo(self, repo_url: str, force: bool = False) -> Path:
-        owner, name = self._parse_repo_url(repo_url)
-        repo_path = self.base_dir / name
+    def fetch_repo(self, repo_url: str) -> Path:
+        """Clone the repo into a unique per-run directory and return its path.
 
-        if repo_path.exists():
-            if not force:
-                logger.info("Repository directory already exists: %s", repo_path)
-                return repo_path
-            logger.info("Force re-clone: removing existing %s", repo_path)
-            shutil.rmtree(repo_path)
+        The per-run unique directory makes concurrent ingests safe: two
+        pipelines never share (or delete each other's) clone — the orchestrator
+        cleans up the returned path after use. Partial clones are removed on
+        failure.
+        """
+        owner, name = self._parse_repo_url(repo_url)
+        repo_path = self.base_dir / f"{name}-{uuid.uuid4().hex[:12]}"
 
         clone_url = self._auth_url(repo_url)
         logger.info("Cloning %s/%s with depth=1...", owner, name)
@@ -38,6 +39,7 @@ class GitHubAPIFetcher:
         )
 
         if result.returncode != 0:
+            shutil.rmtree(repo_path, ignore_errors=True)
             raise RuntimeError(
                 f"git clone failed for {repo_url}: {result.stderr.strip()}"
             )

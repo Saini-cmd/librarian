@@ -5,7 +5,7 @@ Generates per-file summaries (~100 words) using a cheap shared summarization mod
 
 ## Ownership
 - `summarization_pipeline.py` — Orchestrator: deduplicate files → parallel LLM calls → save via `SummaryStore`
-- `file_summarizer.py` — Per-file LLM summary generation with input truncation (~3000 tokens)
+- `file_summarizer.py` — Per-file LLM summary generation with input truncation (~3000 tokens); prompt text in root `prompts.py`
 - `llm_config.py` — `build_summarizer_config()`: shared OpenRouter `ling-3.0-flash` `LLMConfig` from `SUMMARIZE_*` env (model/base_url/api-key/max-tokens); `SUMMARIZE_API_KEY` falls back to `OPENROUTER_API_KEY`
 - `summary_store.py` — DB-backed store (`SessionLocal`), static interface `exists/save/load/get`
 

@@ -1,4 +1,5 @@
 from typing import Any
+import threading
 
 from qdrant_client.models import FieldCondition, Filter, MatchValue
 
@@ -76,17 +77,19 @@ def _kind(node_type: str) -> str:
 
 _PARSER_MANAGER = ParserManager()
 _PARSERS: dict[str, Any] = {}
+_PARSERS_LOCK = threading.Lock()
 
 
 def _get_parser(language: str):
     if not language:
         return None
-    if language not in _PARSERS:
-        try:
-            _PARSERS[language] = _PARSER_MANAGER.get_parser(language)
-        except Exception:
-            _PARSERS[language] = None
-    return _PARSERS.get(language)
+    with _PARSERS_LOCK:
+        if language not in _PARSERS:
+            try:
+                _PARSERS[language] = _PARSER_MANAGER.get_parser(language)
+            except Exception:
+                _PARSERS[language] = None
+        return _PARSERS.get(language)
 
 
 def _parse(language: str, content: str):
