@@ -2,7 +2,7 @@ import logging
 from typing import Any
 
 from embedding.api_embedder import APIEmbedder
-from rag.types import HybridCandidate
+from rag.types import HybridCandidate, HybridRetrievalResult
 from reranking.openrouter_reranker import OpenRouterReranker
 from retrieval.bm25_index import BM25Index
 from retrieval.hybrid_retriever import HybridRetriever
@@ -63,13 +63,40 @@ class RetrievalPipeline:
 
         expanded_query = self.query_expander.expand(query)
 
-        query_vector = self.query_embedder.embed_query(expanded_query)
+        try:
+            query_vector = self.query_embedder.embed_query(expanded_query)
+            retrieval_result = self.hybrid_retriever.retrieve(
+                query=expanded_query,
+                query_vector=query_vector,
+                repo_hash=repo_hash,
+            )
+            degraded = None
+        except Exception:
+            # Query embedding is an external API (OpenRouter). When it's down,
+            # degrade to BM25-only keyword retrieval (local, Qdrant-backed — no
+            # external call) rather than breaking chat — same philosophy as the
+            # rerank fallback (D13).
+            logger.warning(
+                "stage=query_embed_failed falling_back_to_bm25_only hash=%s",
+                repo_hash or "all",
+                exc_info=True,
+            )
+            degraded = "bm25_only"
+            bm25_results = self.bm25_index.search(expanded_query, repo_hash=repo_hash)
+            retrieval_result = HybridRetrievalResult(
+                candidates=[
+                    HybridCandidate(
+                        chunk=r["chunk"],
+                        rrf_score=float(r.get("score") or 0.0),
+                        vector_score=None,
+                        bm25_score=float(r.get("score") or 0.0),
+                    )
+                    for r in bm25_results
+                ],
+                vector_count=0,
+                bm25_count=len(bm25_results),
+            )
 
-        retrieval_result = self.hybrid_retriever.retrieve(
-            query=expanded_query,
-            query_vector=query_vector,
-            repo_hash=repo_hash,
-        )
         logger.info("stage=vector_retrieved count=%d", retrieval_result.vector_count)
         logger.info("stage=bm25_retrieved count=%d", retrieval_result.bm25_count)
 
@@ -105,6 +132,9 @@ class RetrievalPipeline:
                 item["reranked"] = False
 
         logger.info("stage=final_returned count=%d", len(final_results))
+        if degraded:
+            for item in final_results:
+                item["degraded"] = degraded
         return final_results
 
     @staticmethod

@@ -26,6 +26,7 @@ from backend.state import (
     upsert_user,
     user_repo_exists,
 )
+from backend.usage import check_usage, record_usage
 from ingestion.github_api_fetcher import GitHubAPIFetcher
 from orchestration.orchestrator import Orchestrator
 from prompts import EXPLAIN_SYSTEM_PROMPT, explain_user_prompt
@@ -251,6 +252,7 @@ def explain_node(
     metadata; tokens stream over SSE until a final `done` event.
     """
     user = upsert_user(db, clerk_id)
+    check_usage(user.clerk_id, "explain")
     repo = _require_repo_by_hash(db, user.clerk_id, repo_hash)
     llm_client = LLMClient(config=LLMConfig(max_tokens=350))
     loc = f" lines {payload.start_line}-{payload.end_line}" if payload.start_line else ""
@@ -273,6 +275,9 @@ def explain_node(
         except Exception as exc:
             logger.exception("Explain failed for %s", payload.file_path)
             yield f"event: error\ndata: {json.dumps({'error': str(exc)})}\n\n"
+        else:
+            # Completed stream = one LLM call spent; record against the message cap.
+            record_usage(user.clerk_id, "explain")
         finally:
             db.close()
         yield f"data: {json.dumps({'done': True})}\n\n"
@@ -338,6 +343,7 @@ def _sync_run(
             if not usable and lock is not None:
                 # We own the ingest lock: run the pipeline WITHOUT holding a
                 # DB connection for the whole (minutes-long) run.
+                record_usage(clerk_id, "repo_sync")
                 db2.close()
                 db2 = None
                 result_obj = Orchestrator().run(repo.repo_url, on_progress=emit)
@@ -496,6 +502,10 @@ def sync_repository(
         db.close()
         return sse_response([{"type": "result", "result": result, "done": True}])
     db.close()
+
+    # Only the re-ingest path consumes ingest quota: an up-to-date sync no-op
+    # above costs nothing, so it is not gated/recorded.
+    check_usage(clerk_id, "repo_sync")
 
     return StreamingResponse(
         _sync_event_stream(repo, remote_hash, clerk_id),

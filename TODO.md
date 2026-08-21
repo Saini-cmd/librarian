@@ -4,6 +4,19 @@ Working task list for the project. Check items off as they land; add side tasks 
 
 ---
 
+## Usage cap system (see `DECISIONS.md` D37)
+
+Per-user 24h rolling caps on cost-bearing actions (ingest=2, message=20) + repo-size gates (300 files / 6000 chunks). Limits env-tunable; `0` = unlimited.
+
+- [x] **Phase 1 — Ledger + core (done, verified)**: `usage_events` table (9th) + `backend/usage.py` (`check_usage`/`record_usage`/`usage_status`, action groups, per-user expired-row purge). Verified live: table+index created, group-aggregated 429s at the limit, record never raises, purge works. DOX pass done (D37, AGENTS.md, DB_SCHEMA.md Table 9, `.env.example`).
+- [x] **Phase 2 — Orchestrator reorder + repo-size gates (done, verified)**: chunking completes before any API spend; `RepoSizeError` on file gate (300, after scan) and chunk gate (6000, after chunking); summarize ∥ embed then run in parallel and are joined (first failure re-raises). Verified via stubbed-pipeline smoke: both gates fire with zero LLM/embed calls, ordering holds, both stages run. DOX pass done (`orchestration/AGENTS.md`).
+- [x] **Phase 3 — Endpoint enforcement (done, verified)**: `check_usage` pre-spend in chat/chat/stream/explain and (after zero-spend short-circuits) process/sync; `record_usage` at the spend point — owned-pipeline start (`repo_ingest`), sync re-ingest branch (`repo_sync`), completed chat/explain streams. Verified via TestClient with lowered limits + fake auth: chat/explain/process all 429 before any real work. DOX pass done (`backend/AGENTS.md` enforcement bullet, D37 note).
+- [x] **Phase 4 — Frontend 429 handling (done, verified)**: `readError` helper in `src/api/sse.js` returns `{message, quota}`; AppPage process/sync/chat-stream and SymbolGraphView explain detect quota 429s. **UI/UX (done)**: new `QuotaNotice` component (daisyUI `alert alert-warning alert-soft` + `badge` + dismiss) with per-group copy and reset-time — rendered as a banner in AppPage's start/ready views and in the explain panel; chat clears the empty placeholder instead of showing a bubble. Build green. DOX pass done (`frontend/src/api`, `frontend/src/pages`, `frontend/src/components` AGENTS.md).
+- [x] **Phase 5 — DOX closeout (done)**: swept the full DOX chain for stale references — fixed remaining `8 tables` mentions (root `AGENTS.md` index row, `DB_SCHEMA.md` Decision 1 → 9 tables); confirmed `SCALE.md`/`PRODUCTION.md` need no changes; confirmed the eval harness does not use `Orchestrator` so the size gates don't affect it (consistent with D37). Final re-verification green (backend imports + Phase 1/3 smokes).
+- [ ] **Optional follow-ups**: `GET /api/usage` endpoint + settings UI to show remaining quota; a `USAGE_MAX_REPO_BYTES` knob if wanted.
+
+---
+
 ## Symbol graph (see `PLAN.md` for the full plan)
 
 - [x] **Phase 0 — Safety net (done, verified)**: `tests/test_10_symbol_graph.py` (87 checks green across 12 languages); graph JSON `version` field + `GET /graph` stale-rebuild.
@@ -89,6 +102,7 @@ Plan (in priority order):
 ## Side tasks / housekeeping
 
 - [ ] **Security: purge `.env.local` from git history** — `.env.local` (with a real `CLERK_SECRET_KEY`) was tracked in git history before deletion. It's gone from the working tree but still in history — `git rm --cached .env.local` + history purge/rotation if this repo ever goes public.
+- [x] **Chat resilience on embed-API outage (done — D38)** — `RetrievalPipeline.retrieve` degrades to BM25-only keyword retrieval (local/Qdrant, tagged `degraded: "bm25_only"`) when query embedding fails, so `/api/chat` + `/api/chat/stream` never 500 on an OpenRouter outage (surfaced by a transient DNS failure to `openrouter.ai`). Verified via stub smoke (embed raises → BM25-only results, no crash); normal path unchanged. Eval S4 mirror intentionally not updated (dev tool).
 
 ---
 

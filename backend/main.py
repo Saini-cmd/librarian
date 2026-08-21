@@ -23,6 +23,7 @@ from backend.database import SessionLocal, get_db, init_db
 from backend.ingest_lock import GlobalIngestGate, IngestLock, start_lock_heartbeat
 from backend.routers import conversations, repositories, users
 from backend.sse import sse, sse_response, stream_queue
+from backend.usage import check_usage, record_usage
 from backend.state import (
     add_message,
     collection_exists,
@@ -247,6 +248,7 @@ def _run_pipeline(
         db2 = None
         heartbeat_stop = start_lock_heartbeat(lock, gate)
         try:
+            record_usage(clerk_id, "repo_ingest")
             result_obj = Orchestrator().run(repo_url, on_progress=emit)
             db2 = SessionLocal()
             get_or_create_indexed_repo(
@@ -388,6 +390,10 @@ def process_repository(
         return sse_response([{"type": "result", "result": result, "done": True}])
     db.close()
 
+    # Only the pipeline-runs path consumes ingest quota: skip-to-chat reuse of
+    # an already-indexed commit above costs nothing, so it is not gated/recorded.
+    check_usage(user.clerk_id, "repo_ingest")
+
     return StreamingResponse(
         _process_event_stream(repo_url, user.clerk_id, remote_hash),
         media_type="text/event-stream",
@@ -401,6 +407,7 @@ def chat(
     db: Session = Depends(get_db),
 ) -> ChatResponse:
     user = upsert_user(db, clerk_id)
+    check_usage(user.clerk_id, "chat_message")
 
     conv_id = _parse_conversation_id(payload.conversation_id)
     repo_hash, repo_name, repo_url = resolve_conversation_repo(
@@ -441,6 +448,7 @@ def chat(
     enqueue_memory_jobs(
         conversation.id, user_msg.id, msg.id, user.clerk_id, repo_url, repo_hash
     )
+    record_usage(user.clerk_id, "chat_message")
 
     return ChatResponse(answer=result.answer, citations=[asdict(c) for c in result.citations])
 
@@ -449,6 +457,7 @@ def chat(
 def chat_stream(payload: ChatRequest, clerk_id: str = Depends(get_current_user)):
     db = SessionLocal()
     user = upsert_user(db, clerk_id)
+    check_usage(user.clerk_id, "chat_message")
 
     conv_id = _parse_conversation_id(payload.conversation_id)
     repo_hash, repo_name, repo_url = resolve_conversation_repo(
@@ -505,6 +514,7 @@ def chat_stream(payload: ChatRequest, clerk_id: str = Depends(get_current_user))
             enqueue_memory_jobs(
                 conversation.id, user_msg.id, msg.id, user.clerk_id, repo_url, repo_hash
             )
+            record_usage(user.clerk_id, "chat_message")
             yield f"data: {json.dumps({'citations': [asdict(c) for c in citations]})}\n\n"
         finally:
             db.close()

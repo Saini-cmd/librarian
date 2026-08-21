@@ -2,8 +2,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "@clerk/clerk-react";
 
 import { getFileChunks } from "../api/client";
-import { consumeSSE } from "../api/sse";
+import { consumeSSE, readError } from "../api/sse";
 import MessageContent from "./MessageContent";
+import QuotaNotice from "./QuotaNotice";
 import SymbolGraph2DView from "./SymbolGraph2DView";
 
 function assembleFileCode(chunks) {
@@ -35,6 +36,7 @@ export default function SymbolGraphView({ graph, loading, error, repoHash }) {
   const [explainText, setExplainText] = useState("");
   const [explainLoading, setExplainLoading] = useState(false);
   const [explainError, setExplainError] = useState("");
+  const [quota, setQuota] = useState(null);
   const explainTokenRef = useRef(0);
   const explainAbortRef = useRef(null);
 
@@ -100,6 +102,7 @@ export default function SymbolGraphView({ graph, loading, error, repoHash }) {
     setExplainLoading(true);
     setExplainError("");
     setExplainText("");
+    setQuota(null);
     try {
       const headers = { "Content-Type": "application/json" };
       const t = await getToken();
@@ -119,17 +122,14 @@ export default function SymbolGraphView({ graph, loading, error, repoHash }) {
         signal: controller.signal,
       });
 
-      if (!res.ok) {
-        let detail = `Explain request failed (HTTP ${res.status})`;
-        try {
-          const body = await res.json();
-          if (body.detail) detail = body.detail;
-        } catch {
-          // non-JSON error body — keep the generic message
+      if (!res.ok || !res.body) {
+        const { message, quota: q } = await readError(res);
+        if (q) {
+          setQuota(q);
+          return;
         }
-        throw new Error(detail);
+        throw new Error(message);
       }
-      if (!res.body) throw new Error("Empty response from explain endpoint");
 
       await consumeSSE(res, (ev) => {
         if (token !== explainTokenRef.current) return;
@@ -257,7 +257,7 @@ export default function SymbolGraphView({ graph, loading, error, repoHash }) {
               </section>
             )}
 
-            {(explainLoading || explainText || explainError) && (
+            {(explainLoading || explainText || explainError || quota) && (
               <section className="space-y-2 border-t border-base-content/10 pt-3">
                 <div className="flex items-center justify-between">
                   <h4 className="font-mono text-[10px] uppercase tracking-widest text-base-content/40">
@@ -274,6 +274,9 @@ export default function SymbolGraphView({ graph, loading, error, repoHash }) {
                 </div>
                 {explainLoading && !explainText && (
                   <span className="loading loading-dots loading-sm" />
+                )}
+                {quota && (
+                  <QuotaNotice quota={quota} onDismiss={() => setQuota(null)} />
                 )}
                 {explainError && (
                   <p className="text-xs font-mono text-error">{explainError}</p>

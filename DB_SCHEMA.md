@@ -2,15 +2,15 @@
 
 Working reference doc for the new Postgres data model. Details are being defined table-by-table; this file is the shared source of truth during the redesign.
 
-- **Status**: complete (8 tables defined) — see Relationships summary + Migration notes below
-- **Scope**: 8 required Postgres tables in `backend/models.py`
+- **Status**: complete (9 tables defined) — see Relationships summary + Migration notes below
+- **Scope**: 9 required Postgres tables in `backend/models.py`
 - **Related**: `backend/models.py`, `backend/state.py`, `backend/database.py`, `.env.example`
 
 ---
 
 ## Decisions (confirmed)
 
-1. **Repo identity = normalized `repo_url` + per-commit `repo_hash`**; `repo_name` is display-only (derived from the URL), never used for lookups/scoping. Qdrant chunks carry `repo_url` (display) and `repo_hash` in their payload. **Qdrant scoping is hash-only**: every read (retrieval, BM25, symbol graph) filters by `repo_hash` alone — it is globally unique, so retained old-commit chunks never leak into a newer commit's results and no repo dimension is needed. No table changes result from this (8 tables stay).
+1. **Repo identity = normalized `repo_url` + per-commit `repo_hash`**; `repo_name` is display-only (derived from the URL), never used for lookups/scoping. Qdrant chunks carry `repo_url` (display) and `repo_hash` in their payload. **Qdrant scoping is hash-only**: every read (retrieval, BM25, symbol graph) filters by `repo_hash` alone — it is globally unique, so retained old-commit chunks never leak into a newer commit's results and no repo dimension is needed. No table changes result from this (9 tables stay).
 2. **User ↔ repo linkage**: no join table. A user's repos are derived from their `conversations.repo_hash`.
 3. **Ingestion progress**: the frontend poll is being replaced (streaming/SSE), so `pipeline_state` is not re-created. `indexed_repo.status` holds coarse state.
 4. **Old-commit cleanup**: after a successful sync, old commits are soft-deleted via `indexed_repo.status = 'deleted'`. Only the commit's **cited chunks** (those referenced by a `citation` row) are retained in Qdrant; all other chunks are deleted via `VectorIndexer.delete_by_repo_hash`. `file_summary` + `repo_graph` for the tombstoned commit are deleted. `latest_indexed_repo_by_name` and `list_user_repos` skip `status='deleted'`.
@@ -186,6 +186,24 @@ Indexes: `chunk_id`, `repo_hash`, `message_id`.
 | `last_message_id` | uuid | yes | — | Watermark — resume point for the summarizer |
 | `updated_at` | timestamptz | no | now() | Last summary update |
 
+## Table 9 — `usage_events`
+
+**Purpose**: One row per cost-bearing action a user performs, backing the 24h per-user usage caps (`backend/usage.py`). Append-only; expired rows are purged opportunistically on each `record_usage`.
+
+**Design notes**:
+- `clerk_id` + `action` + `created_at` — no FK (users are also keyed by `clerk_id` in `users`, but usage is a fire-and-forget ledger; a missing user row must not block recording).
+- The composite index `ix_usage_events_clerk_action_time` serves the exact cap query: `WHERE clerk_id = ? AND action IN (...) AND created_at >= now() - window`.
+- Counting is Postgres-side, so caps are correct across uvicorn workers and need no Redis (per `SCALE.md`).
+
+| Column | Type (proposed) | Null | Default | Notes |
+|---|---|---|---|---|
+| `id` | uuid | no | uuid4 | Primary key |
+| `clerk_id` | varchar(255) | no | — | User (Clerk id) the action is attributed to |
+| `action` | varchar(50) | no | — | Cost-bearing action (`repo_ingest` / `repo_sync` / `chat_message` / `explain`) |
+| `created_at` | timestamptz | no | now() | When the action spent budget |
+
+Indexes: composite `(clerk_id, action, created_at)`.
+
 ## Relationships summary
 
 ```
@@ -200,6 +218,8 @@ indexed_repo (id PK; repo_hash UNIQUE)   ← "same repo, different hashes"
   ├── repo_graph.repo_hash    → indexed_repo.repo_hash   (per-commit graph)
   ├── conversations.repo_hash → indexed_repo.repo_hash   (updated on sync → new hash)
   └── citation.repo_hash      → indexed_repo.repo_hash   (RESTRICT; retains cited chunks)
+
+usage_events (id PK; clerk_id + action + created_at)   ← standalone ledger, no FK
 ```
 
 ## Migration notes (current → new)
@@ -216,3 +236,4 @@ indexed_repo (id PK; repo_hash UNIQUE)   ← "same repo, different hashes"
 | `qa_records` | dropped | — |
 | — | `citation` | new — durable per-message citations for retention/cleanup |
 | — | `conversation_summaries` | new — rolling short-term memory summary (chat-memory feature) |
+| — | `usage_events` | new — per-user cost-bearing action ledger for the 24h usage caps |

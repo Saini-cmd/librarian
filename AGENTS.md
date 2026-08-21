@@ -173,7 +173,7 @@ curl -X POST http://localhost:8000/api/reset   # wipes Qdrant collection + index
 
 | Path | Purpose |
 |---|---|
-| `backend/` | FastAPI server — REST API for repo ingestion, chat, users, conversations, repos, and **sync/diff**; repo identity = normalized `repo_url` + per-commit `repo_hash`; PostgreSQL-backed state (sync SQLAlchemy, 8 tables; schema in `DB_SCHEMA.md`); **concurrent ingest serialized per commit via a Redis lock with wait-and-reuse** (`ingest_lock.py`) |
+| `backend/` | FastAPI server — REST API for repo ingestion, chat, users, conversations, repos, and **sync/diff**; repo identity = normalized `repo_url` + per-commit `repo_hash`; PostgreSQL-backed state (sync SQLAlchemy, 9 tables; schema in `DB_SCHEMA.md`); **concurrent ingest serialized per commit via a Redis lock with wait-and-reuse** (`ingest_lock.py`); **per-user 24h usage caps** for cost-bearing actions (`usage.py` — `USAGE_INGEST_MAX`/`USAGE_MESSAGE_MAX`) |
 | `chunking/` | Semantic code chunking (AST + text) — no pickle, no summaries |
 | `embedding/` | Embedding pipeline — vectorize chunks via OpenRouter API and upsert to Qdrant |
 | `frontend/` | React 18 SPA — daisyUI 5 + Tailwind CSS 4, brutalist dark theme, router-based pages (Landing, App, Settings), Axios API client with Clerk auth |
@@ -198,7 +198,7 @@ curl -X POST http://localhost:8000/api/reset   # wipes Qdrant collection + index
 | `venv/` | Python virtual environment (not tracked) |
 | `.env` | Backend env file — all backend secrets/config (model APIs, infra, Clerk). Not tracked; loaded via `load_dotenv()` from the repo root. Schema documented in `.env.example` |
 | `frontend/.env` | Frontend env file — `VITE_*` vars for Vite (e.g. `VITE_CLERK_PUBLISHABLE_KEY`); not tracked, read by Vite from the frontend dir |
-| `DB_SCHEMA.md` | Working reference for the Postgres data model (8 tables) — not durable code |
+| `DB_SCHEMA.md` | Working reference for the Postgres data model (9 tables) — not durable code |
 | `DECISIONS.md` | Key-decisions log for the evaluation system (running record; kept current by `evaluation/AGENTS.md`) |
 | `TODO.md` | Task tracker — remaining sync-feature work + side tasks; schema/identity reference lives in `DB_SCHEMA.md` |
 | `PLAN.md` | Working implementation plan for symbol-graph correctness across all languages (phases + decisions); not durable code |

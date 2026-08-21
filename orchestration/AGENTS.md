@@ -1,15 +1,17 @@
 # orchestration/
 
 ## Purpose
-Orchestrates the full ingestion pipeline: clone → chunk → summarize → embed → build symbol graph → cleanup. A single `Orchestrator.run(repo_url)` call drives all stages sequentially.
+Orchestrates the full ingestion pipeline: clone → scan → **file-size gate** → chunk → **chunk-size gate** → summarize ∥ embed → build symbol graph → cleanup. A single `Orchestrator.run(repo_url)` call drives all stages in order, aborting before any LLM/embed spend if the repo exceeds the configured size gates.
 
 ## Ownership
 - `orchestrator.py` — `Orchestrator` class with `run()` method and `RunResult` dataclass (includes the built `graph`)
 
 ## Local Contracts
-- Runs stages in fixed dependency order: ingestion → (summarization ∥ chunking → embedding) → symbol graph build → cleanup
+- Runs stages in fixed dependency order: ingestion → (chunk → summarize ∥ embed) → symbol graph build → cleanup
+- **Repo-size gates (usage-cap system, DECISIONS.md D37)**: after scanning, if `len(files) > USAGE_MAX_REPO_FILES` (default 300, `0` disables) it raises `RepoSizeError` before `ensure_repo_indexing` (no `indexed_repo` row, no API spend); after local chunking, if `len(chunks) > USAGE_MAX_REPO_CHUNKS` (default 6000) it raises `RepoSizeError` before embedding/summarization (row exists → `mark_repo_failed`). Both are deliberately checked **before any LLM/embed API call** so a rejected repo costs nothing. The message is user-facing (surfaces via the SSE `{type: error}` event)
 - `run(repo_url, on_progress=None)` accepts an optional `on_progress(stage, percent, message)` callback; it fires at each stage boundary (`ingest` 5 → `scan` 15 → `index` 20 → `chunk` 35/50 → `summarize_embed` 60 → `embed` 85 → `graph` 95 → `done` 100) so callers (e.g. the SSE endpoints) can stream progress. The callback is a plain callable; it must not raise
-- **Parallel**: after scanning, summarization (slow per-file LLM) runs in a worker thread while chunking → embedding proceed in the main thread — both consume only `files`, so there is no ordering dependency. The orchestrator joins the summary task before building the graph; a summarization exception re-raises via `future.result()` (same fail semantics as serial)
+- **Parallel**: after chunking completes (and its gate passes), summarization (per-file LLM) and embedding (per-chunk OpenRouter) run concurrently in a `ThreadPoolExecutor(max_workers=2)` — they consume disjoint inputs (`files` vs `chunks`), each uses its own internal worker pool + DB sessions, so side-by-side execution is thread-safe. Both futures are joined via `as_completed` and the first failure re-raises (same fail semantics as serial; the pool drains before the `with` exits)
+- **Chunking completes before any API spend**: chunking is local CPU, so it runs to completion first; only then do summarize/embed (the minutes-long, cost-bearing stages) start. This is what lets the chunk gate reject oversized repos cheaply
 - **Normalizes the repo URL at entry** (`backend.state.normalize_repo_url`) — the canonical URL is what ingestion stamps on file metadata (`repo_url`), what is stored in `indexed_repo`, and what downstream uses. scp-style/ssh forms are converted to https here, once
 - Captures the repo's HEAD commit SHA (`git rev-parse HEAD` on the clone) and returns it as `RunResult.repo_hash` — the durable per-commit identity for `indexed_repo`
 - **Clone isolation**: `ingest()` returns `(files, repo_dir)` — `repo_dir` is the unique per-run clone dir (concurrent ingests never share one). The orchestrator reads the commit SHA from that exact dir and always deletes it in `finally` (concurrent-safe rmtree, since the dir is exclusively ours)

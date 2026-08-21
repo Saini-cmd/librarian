@@ -15,6 +15,7 @@ Hybrid retrieval pipeline combining dense vector search and BM25 keyword search 
 ## Local Contracts
 - Dense + BM25 → RRF → rerank → post-process pipeline order
 - Query embedding via `embedding.api_embedder.APIEmbedder` (OpenRouter API)
+- **Embed-outage degrade (D38)**: `RetrievalPipeline.retrieve` wraps query embedding + hybrid retrieval in `try/except`; if the embed API is unreachable it falls back to **BM25-only keyword retrieval** (local, Qdrant-backed — no external call), logs `stage=query_embed_failed falling_back_to_bm25_only`, and tags every result `degraded: "bm25_only"` (in addition to the rerank tag, which stays `False` during the same outage via the existing D13 fallback). Chat never 500s on an embed-API outage; keyword-only quality is the accepted degradation
 - BM25 index built from Qdrant payloads and cached per commit
 - **Hash-only scoping**: retrieval is scoped to a specific commit via `repo_hash` (Qdrant `repo_hash` payload `FieldCondition` applied to both dense and BM25 paths). `repo_hash=None` searches all commits. The repo-name/URL filter was removed — `repo_hash` is globally unique, so no repo dimension is needed
 - BM25 index cached per `repo_hash` key — a synced commit gets a fresh index automatically

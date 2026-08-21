@@ -5,6 +5,7 @@ from sqlalchemy import (
     JSON,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
@@ -181,3 +182,23 @@ class ConversationSummary(Base):
     )
 
     conversation: Mapped["Conversation"] = relationship(back_populates="summary")
+
+
+class UsageEvent(Base):
+    """One recorded cost-bearing action (per user), for the 24h usage cap.
+
+    Append-only: ``record_usage`` inserts a row per action the user actually
+    spent API budget on; ``check_usage`` counts rows newer than the window. The
+    composite index serves the exact count query
+    ``WHERE clerk_id = ? AND action IN (...) AND created_at >= ?``.
+    """
+
+    __tablename__ = "usage_events"
+    __table_args__ = (
+        Index("ix_usage_events_clerk_action_time", "clerk_id", "action", "created_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    clerk_id: Mapped[str] = mapped_column(String(255))
+    action: Mapped[str] = mapped_column(String(50))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)

@@ -6,6 +6,7 @@ import ProgressBar from "../components/ProgressBar";
 import ChatMessages from "../components/ChatMessages";
 import CitationCard from "../components/CitationCard";
 import SymbolGraphView from "../components/SymbolGraphView";
+import QuotaNotice from "../components/QuotaNotice";
 import {
   getConversations,
   getConversation,
@@ -15,7 +16,7 @@ import {
   getRepoGraph,
   getRepoUpdates,
 } from "../api/client";
-import { consumeSSE } from "../api/sse";
+import { consumeSSE, readError } from "../api/sse";
 
 const extractRepoName = (url) =>
   (url.replace(/\.git$/, "").split("/").pop()) || "repo";
@@ -44,6 +45,7 @@ export default function AppPage() {
   const [graphLoading, setGraphLoading] = useState(false);
   const [graphError, setGraphError] = useState("");
   const [openCitation, setOpenCitation] = useState(null);
+  const [quota, setQuota] = useState(null);
   const abortRef = useRef(null);
   const msgIdRef = useRef(0);
 
@@ -117,6 +119,7 @@ export default function AppPage() {
   }
 
   async function handleProcess(repoUrl) {
+    setQuota(null);
     const repoName = extractRepoName(repoUrl);
     const existing = repositories.find((r) => r.repo_name === repoName);
     if (existing) {
@@ -155,8 +158,15 @@ export default function AppPage() {
       });
 
       if (!res.ok || !res.body) {
-        const errText = await res.text();
-        throw new Error(errText || "Pipeline request failed");
+        const { message, quota: q } = await readError(res);
+        if (q) {
+          setQuota(q);
+          setPhase("idle");
+          setProgress(0);
+          setStatusText("");
+          return;
+        }
+        throw new Error(message);
       }
 
       let result = null;
@@ -216,6 +226,7 @@ export default function AppPage() {
     setActiveConvId(null);
     setMessages([]);
     setOpenCitation(null);
+    setQuota(null);
     setSelectedRepo(null);
     setSelectedRepoHash(null);
     setUpdatesAvailable(false);
@@ -243,6 +254,7 @@ export default function AppPage() {
 
   async function handleSync() {
     if (!selectedRepoHash || syncing) return;
+    setQuota(null);
     setSyncing(true);
     try {
       const headers = { "Content-Type": "application/json" };
@@ -252,8 +264,12 @@ export default function AppPage() {
         { method: "POST", headers }
       );
       if (!res.ok || !res.body) {
-        const errText = await res.text();
-        throw new Error(errText || "Sync request failed");
+        const { message, quota: q } = await readError(res);
+        if (q) {
+          setQuota(q);
+          return;
+        }
+        throw new Error(message);
       }
 
       let result = null;
@@ -297,6 +313,7 @@ export default function AppPage() {
     const userMsg = draft.trim();
     setDraft("");
     setOpenCitation(null);
+    setQuota(null);
     const userMsgId = `local-${++msgIdRef.current}`;
     const placeholderId = `local-${++msgIdRef.current}`;
     setMessages((prev) => [
@@ -327,7 +344,19 @@ export default function AppPage() {
       });
 
       if (!res.ok || !res.body) {
-        throw new Error("Streaming chat failed");
+        const { message, quota: q } = await readError(res);
+        if (q) {
+          setQuota(q);
+          setStreaming(false);
+          setMessages((prev) =>
+            prev.filter(
+              (msg) => msg.id !== userMsgId && msg.id !== placeholderId
+            )
+          );
+          setDraft(userMsg);
+          return;
+        }
+        throw new Error(message);
       }
 
       const reader = res.body.getReader();
@@ -382,6 +411,17 @@ export default function AppPage() {
       setMessages((prev) =>
         prev.filter((msg) => msg.id !== placeholderId || msg.content)
       );
+      if (err.message) {
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `local-${++msgIdRef.current}`,
+            role: "assistant",
+            content: err.message,
+            repo_hash: selectedRepoHash,
+          },
+        ]);
+      }
     }
   }
 
@@ -450,6 +490,12 @@ export default function AppPage() {
               </div>
             </div>
 
+            {quota && (
+              <div className="px-6 pt-3">
+                <QuotaNotice quota={quota} onDismiss={() => setQuota(null)} />
+              </div>
+            )}
+
             {view === "graph" ? (
               <SymbolGraphView
                 graph={graph}
@@ -505,6 +551,9 @@ export default function AppPage() {
         ) : (
           <div className="flex-1 flex items-center justify-center p-8 bg-base-100">
             <div className="w-full max-w-2xl mx-auto space-y-10">
+              {quota && (
+                <QuotaNotice quota={quota} onDismiss={() => setQuota(null)} />
+              )}
               <div className="text-center space-y-2">
                 <h2 className="text-4xl lg:text-5xl font-bold tracking-tight text-base-content">
                   Librarian AI
