@@ -25,7 +25,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
-from prompts import (
+from core.prompts import (
     GOLDEN_PARAPHRASE_FORCE_HIDE_SYSTEM_PROMPT,
     GOLDEN_PARAPHRASE_SYSTEM_PROMPT,
     golden_paraphrase_user_prompt,

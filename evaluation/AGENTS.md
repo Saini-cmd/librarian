@@ -4,11 +4,11 @@
 Reproducible, URL-driven evaluation harness for the RAG pipeline. Given a repo URL, it ingests the repo twice (naive token chunks + AST chunks) into isolated Qdrant collections, builds a synthetic golden set from AST entities, runs four pipeline setups (S1 vector-on-naive, S2 vector-on-AST, S3 hybrid RRF, S4 hybrid + rerank), scores six metrics (Context Recall, Context Precision, MRR, Recall@K, Faithfulness, Answer Relevance), and emits a professional academic-style HTML report plus JSON/Markdown.
 
 ## Ownership
-- `golden_set.py` — Golden-set construction: sample AST entities, DeepSeek-paraphrase into developer questions (symbol name hidden; prompt in root `prompts.py`), retry+drop queries that leak the symbol name, cache/load committed JSON
+- `golden_set.py` — Golden-set construction: sample AST entities, DeepSeek-paraphrase into developer questions (symbol name hidden; prompt in `core/prompts.py`), retry+drop queries that leak the symbol name, cache/load committed JSON
 - `ingest.py` — Ingest a repo twice (naive + AST) into `code_chunks_eval_naive` / `code_chunks_eval_ast`; incremental embedding, always cleans up the clone (unique per-run dir via `ingest()` → `(files, repo_dir)`, removed in `finally`); accepts an optional `progress(collection, done, total)` callback (per embed batch) for the CLI progress bar
 - `pipelines.py` — S1–S4 setup runners composing existing retriever components; all setups return `final_top_k` ranked results for a fair comparison; S4 mirrors the production rerank-fallback (degraded results tagged `reranked: False`)
 - `metrics.py` — The metrics: Context Recall/Precision, MRR, Recall@K (deterministic span math, **strict** line overlap per D15) + Faithfulness, Answer Relevance (DeepSeek-judged)
-- `llm_judge.py` — DeepSeek judge wrappers for Faithfulness and Answer Relevance (coverage protocol, D16; prompts in root `prompts.py`); `Judge.sanity_check()` verifies the judge discriminates good vs hallucinated answers; a failed call yields `None` (never fails a run)
+- `llm_judge.py` — DeepSeek judge wrappers for Faithfulness and Answer Relevance (coverage protocol, D16; prompts in `core/prompts.py`); `Judge.sanity_check()` verifies the judge discriminates good vs hallucinated answers; a failed call yields `None` (never fails a run)
 - `charts.py` — Static matplotlib figures (PNG): grouped retrieval bars, component deltas, Recall@K curve, aggregate multi-repo chart
 - `report.py` — Report data model (`EvalReport`) + JSON / Markdown / self-contained HTML renderers (`write_report`); PDF export via WeasyPrint (`report.pdf` / `aggregate.pdf`), gracefully skipped if WeasyPrint/system libs are missing
 - `templates/report.css` — Academic journal styling for the HTML report

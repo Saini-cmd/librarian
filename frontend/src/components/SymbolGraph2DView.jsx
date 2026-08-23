@@ -15,11 +15,15 @@ import {
 import "@xyflow/react/dist/style.css";
 import ELK from "elkjs/lib/elk.bundled.js";
 import { useGraphTheme } from "../theme";
+import { IconFilter, IconClose, IconChevronsLeft } from "../icons/Icon";
 
 const EDGE_WIDTH = 1;
 const EDGE_OPACITY = 0.55;
 const EDGE_OPACITY_DIM = 0.12;
 const EDGE_HIGHLIGHT_WIDTH = 2.5;
+
+const isMobileViewport = () =>
+  typeof window !== "undefined" && !window.matchMedia("(min-width: 1024px)").matches;
 
 const NODE_WIDTH = 200;
 const NODE_HEIGHT = 52;
@@ -173,11 +177,11 @@ const NodeCard = memo(function NodeCard({ data }) {
     <div
       className={`relative rounded-xl border border-base-content/10 bg-base-100 px-2.5 py-1.5 shadow-sm transition-[opacity,box-shadow,outline] duration-200 ${
         selected
-          ? "outline outline-2 outline-primary glow"
+          ? "outline outline-primary glow"
             : faded
               ? "opacity-20"
               : neighbor
-                ? "outline outline-1 outline-primary/60 opacity-80"
+                ? "outline outline-primary/60 opacity-80"
                 : ""
       }`}
       style={{ width: NODE_WIDTH }}
@@ -188,11 +192,11 @@ const NodeCard = memo(function NodeCard({ data }) {
         className="absolute left-0 top-0 h-full w-1 rounded-l-xl"
         style={{ backgroundColor: color }}
       />
-      <div className="pl-1.5 font-mono text-[11px] leading-tight text-base-content truncate" title={label}>
+      <div className="pl-1.5 font-mono text-[0.6875rem] leading-tight text-base-content truncate" title={label}>
         {label}
       </div>
       <div
-        className="pl-1.5 font-mono text-[9px] uppercase tracking-widest"
+        className="pl-1.5 font-mono text-[0.5625rem] uppercase tracking-widest"
         style={{ color }}
       >
         {kind}
@@ -208,11 +212,11 @@ const FileGroup = memo(function FileGroup({ data }) {
     <div
       className={`h-full w-full rounded-2xl border border-base-content/15 bg-base-200/60 shadow-sm transition-[opacity,box-shadow,outline] duration-200 ${
         selected
-          ? "outline outline-2 outline-primary"
+          ? "outline outline-primary"
           : faded
             ? "opacity-25"
             : neighbor
-              ? "outline outline-1 outline-primary/50 opacity-90"
+              ? "outline outline-primary/50 opacity-90"
               : ""
       }`}
     >
@@ -221,7 +225,7 @@ const FileGroup = memo(function FileGroup({ data }) {
       <div className="flex items-center gap-1.5 border-b border-base-content/10 px-2.5 py-1">
         <span className="h-2 w-2 shrink-0 rounded-sm" style={{ backgroundColor: color }} />
         <span
-          className="truncate font-mono text-[10px] font-semibold uppercase tracking-widest text-base-content"
+          className="truncate font-mono text-[0.625rem] font-semibold uppercase tracking-widest text-base-content"
           title={label}
         >
           {label}
@@ -336,8 +340,10 @@ function GraphFlow({ graph, selectedId, onSelect }) {
   selectedIdRef.current = selectedId;
   const [kindFilter, setKindFilter] = useState(() => new Set());
   const [dirFilter, setDirFilter] = useState("");
+  const [dirOpen, setDirOpen] = useState(false);
   const filtersActive = kindFilter.size > 0 || dirFilter !== "";
   const [filterOpen, setFilterOpen] = useState(false);
+  const [legendOpen, setLegendOpen] = useState(true);
   const filterRef = useRef(null);
 
   const base = useMemo(() => {
@@ -591,7 +597,10 @@ function GraphFlow({ graph, selectedId, onSelect }) {
         onPaneClick={() => onSelect(null)}
       >
         <Background color={graphTheme.grid} gap={28} size={1} />
-        <Controls showInteractive={false} />
+        <Controls
+          showInteractive={false}
+          onFitView={() => rf.fitView({ padding: 0.2, duration: 400 })}
+        />
         <MiniMap nodeColor={(n) => n.data?.color || graphTheme.minimap} pannable zoomable />
       </ReactFlow>
 
@@ -603,27 +612,21 @@ function GraphFlow({ graph, selectedId, onSelect }) {
 
       {filteredEmpty && (
         <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center">
-          <span className="rounded-xl border border-base-content/10 bg-base-100/80 px-4 py-2 font-mono text-[11px] uppercase tracking-widest text-base-content/60 backdrop-blur-md">
+          <span className="rounded-xl border border-base-content/10 bg-base-100/80 px-4 py-2 font-mono text-[0.6875rem] uppercase tracking-widest text-base-content/60 backdrop-blur-md">
             No nodes match the current filters
           </span>
         </div>
       )}
 
-      <div className="absolute top-2 right-2 z-30 flex items-center gap-1">
+      <div className="absolute top-2 right-2 z-30 flex items-center gap-2">
         {filtersActive && (
           <button
-            className="btn btn-circle btn-sm btn-ghost border border-base-content/10"
-            title="Reset filters"
+            className="btn btn-sm btn-ghost gap-1 border border-base-content/10"
+            title="Clear all filters"
             onClick={clearFilters}
           >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              viewBox="0 0 20 20"
-              fill="currentColor"
-              className="h-4 w-4"
-            >
-              <path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z" />
-            </svg>
+            <IconClose className="h-4 w-4" />
+            Clear All
           </button>
         )}
 
@@ -631,36 +634,29 @@ function GraphFlow({ graph, selectedId, onSelect }) {
           ref={filterRef}
           className="dropdown dropdown-end"
           open={filterOpen}
-          onToggle={(e) => setFilterOpen(e.target.open)}
+          onToggle={(e) => {
+            const open = e.target.open;
+            setFilterOpen(open);
+            if (open && isMobileViewport()) setLegendOpen(false);
+          }}
         >
           <summary className="btn btn-sm btn-ghost gap-1 border border-base-content/10">
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              viewBox="0 0 20 20"
-              fill="currentColor"
-              className="h-4 w-4"
-            >
-              <path
-                fillRule="evenodd"
-                d="M2.628 1.601C5.028 1.206 7.49 1 10 1s4.973.206 7.372.601a.75.75 0 0 1 .628.74v2.288a2.25 2.25 0 0 1-.659 1.59l-4.682 4.683a2.25 2.25 0 0 0-.659 1.59v3.037c0 .684-.31 1.33-.844 1.757l-1.937 1.55A.75.75 0 0 1 8 18.25v-5.757a2.25 2.25 0 0 0-.659-1.591L2.659 6.22A2.25 2.25 0 0 1 2 4.629V2.34a.75.75 0 0 1 .628-.74Z"
-                clipRule="evenodd"
-              />
-            </svg>
+            <IconFilter className="h-4 w-4" />
             {filtersActive && (
               <span className="badge badge-primary badge-xs">{filterCount}</span>
             )}
           </summary>
-          <div className="dropdown-content z-30 mt-2 w-64 max-h-[70vh] overflow-y-auto rounded-xl border border-base-content/10 bg-base-100 p-3 shadow-xl backdrop-blur-md">
+          <div className="dropdown-content z-30 mt-2 w-70 md:w-80 max-h-[70vh] overflow-y-auto rounded-xl border border-base-content/10 bg-base-100 p-3 shadow-xl backdrop-blur-md">
             <div className="space-y-3">
               <section className="space-y-1">
-                <div className="font-mono text-[9px] uppercase tracking-widest text-base-content/40">
+                <div className="font-mono text-[0.5625rem] uppercase tracking-widest text-base-content/40">
                   Node type
                 </div>
-                <div className="grid grid-cols-2 gap-1">
+                <div className="grid grid-cols-2 gap-x-3 gap-y-1.5">
                   {kinds.map((kind) => (
                     <label
                       key={kind}
-                      className="flex cursor-pointer items-center gap-1.5 font-mono text-[11px] text-base-content"
+                      className="flex cursor-pointer items-center gap-1.5 font-mono text-[0.6875rem] text-base-content"
                     >
                       <input
                         type="checkbox"
@@ -679,63 +675,110 @@ function GraphFlow({ graph, selectedId, onSelect }) {
               </section>
 
               <section className="space-y-1">
-                <div className="font-mono text-[9px] uppercase tracking-widest text-base-content/40">
+                <div className="font-mono text-[0.5625rem] uppercase tracking-widest text-base-content/40">
                   Directory
                 </div>
-                <select
-                  className="select select-sm select-bordered w-full font-mono text-[11px]"
-                  value={dirFilter}
+                <button
+                  type="button"
+                  className="btn btn-sm btn-ghost w-full justify-between border border-base-content/10 font-mono text-[0.6875rem]"
+                  onClick={() => setDirOpen((o) => !o)}
                   title={dirFilter || "All directories"}
-                  onChange={(e) => setDirFilter(e.target.value)}
-                  style={{ textOverflow: "ellipsis", overflow: "hidden", whiteSpace: "nowrap" }}
                 >
-                  <option value="">All directories</option>
-                  {dirs.map((dir) => {
-                    const depth = dir.split("/").length - 1;
-                    const indent = dirFilter === dir ? "" : "\u00A0\u00A0".repeat(depth);
-                    return (
-                      <option key={dir} value={dir}>
-                        {dir === "(root)" ? "(root)" : `${indent}${dir}`}
-                      </option>
-                    );
-                  })}
-                </select>
+                  <span className="truncate">{dirFilter || "All directories"}</span>
+                  <IconChevronsLeft
+                    className={`w-3 h-3 shrink-0 transition-transform ${dirOpen ? "rotate-90" : "-rotate-90"}`}
+                  />
+                </button>
+                {dirOpen && (
+                  <ul className="max-h-40 overflow-y-auto rounded-xl border border-base-content/10 bg-base-100 p-1 space-y-0.5">
+                    <li>
+                      <button
+                        type="button"
+                        className={`w-full text-left truncate rounded-lg px-2 py-1 font-mono text-[0.6875rem] ${
+                          dirFilter === ""
+                            ? "bg-primary/10 text-primary"
+                            : "text-base-content hover:bg-base-content/5"
+                        }`}
+                        onClick={() => {
+                          setDirFilter("");
+                          setDirOpen(false);
+                        }}
+                      >
+                        All directories
+                      </button>
+                    </li>
+                    {dirs.map((dir) => (
+                      <li key={dir}>
+                        <button
+                          type="button"
+                          className={`w-full text-left truncate rounded-lg px-2 py-1 font-mono text-[0.6875rem] ${
+                            dirFilter === dir
+                              ? "bg-primary/10 text-primary"
+                              : "text-base-content hover:bg-base-content/5"
+                          }`}
+                          onClick={() => {
+                            setDirFilter(dir);
+                            setDirOpen(false);
+                          }}
+                        >
+                          {dir}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
               </section>
 
               <div className="flex items-center justify-between border-t border-base-content/10 pt-2">
-                <span className="font-mono text-[9px] uppercase tracking-widest text-base-content/50">
+                <span className="font-mono text-[0.5625rem] uppercase tracking-widest text-base-content/50">
                   {filtersActive
                     ? `${matchCount} of ${totalCount} nodes`
                     : `${totalCount} nodes`}
                 </span>
-                <button className="btn btn-xs btn-ghost" onClick={clearFilters}>
-                  Clear all
-                </button>
               </div>
             </div>
           </div>
         </details>
       </div>
 
-      <div className="absolute top-2 left-2 z-10 space-y-1 rounded-xl border border-base-content/10 bg-base-100/80 backdrop-blur-md px-2.5 py-1.5 font-mono text-[9px] uppercase tracking-widest text-base-content/70">
-        <div className="text-[8px] text-primary">Edges</div>
-        <div className="flex flex-wrap gap-x-3 gap-y-1">
-          {Object.entries(graphTheme.edges).map(([type, color]) => (
-            <span key={type} className="inline-flex items-center gap-1">
-              <span className="h-2 w-2 rounded-sm" style={{ backgroundColor: color }} />
-              {type}
-            </span>
-          ))}
-        </div>
-        <div className="pt-1 text-[8px] text-base-content/40">Nodes</div>
-        <div className="flex flex-wrap gap-x-3 gap-y-1">
-          {Object.entries(graphTheme.kinds).map(([kind, color]) => (
-            <span key={kind} className="inline-flex items-center gap-1">
-              <span className="h-2 w-2 rounded-sm" style={{ backgroundColor: color }} />
-              {kind}
-            </span>
-          ))}
-        </div>
+      <div className="absolute top-2 left-2 z-10">
+        <button
+          className="flex items-center gap-1.5 rounded-xl border border-base-content/10 bg-base-100/80 backdrop-blur-md px-2.5 py-1.5 font-mono text-[0.625rem] uppercase tracking-widest text-base-content/70"
+          onClick={() => {
+            setLegendOpen((prev) => {
+              const next = !prev;
+              if (next && isMobileViewport()) setFilterOpen(false);
+              return next;
+            });
+          }}
+        >
+          Legend
+          <IconChevronsLeft
+            className={`w-3.5 h-3.5 transition-transform ${legendOpen ? "rotate-90" : "-rotate-90"}`}
+          />
+        </button>
+        {legendOpen && (
+          <div className="mt-1 w-70 md:w-140 space-y-1 rounded-xl border border-base-content/10 bg-base-100/80 backdrop-blur-md px-2.5 py-1.5 font-mono text-[0.625rem] uppercase tracking-widest text-base-content/70">
+            <div className="text-[0.625rem] text-primary">Edges</div>
+            <div className="flex flex-wrap gap-x-4 gap-y-1">
+              {Object.entries(graphTheme.edges).map(([type, color]) => (
+                <span key={type} className="inline-flex items-center gap-1.5">
+                  <span className="h-2 w-2 rounded-sm" style={{ backgroundColor: color }} />
+                  {type}
+                </span>
+              ))}
+            </div>
+            <div className="pt-1 text-[0.625rem] text-base-content/40">Nodes</div>
+            <div className="flex flex-wrap gap-x-4 gap-y-1">
+              {Object.entries(graphTheme.kinds).map(([kind, color]) => (
+                <span key={kind} className="inline-flex items-center gap-1.5">
+                  <span className="h-2 w-2 rounded-sm" style={{ backgroundColor: color }} />
+                  {kind}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

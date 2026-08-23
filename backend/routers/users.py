@@ -3,8 +3,8 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from backend.auth import get_current_user
-from backend.database import get_db
-from backend.state import upsert_user
+from core.db import get_db
+from core.repositories.users import upsert_user
 
 
 router = APIRouter(prefix="/api/users", tags=["users"])

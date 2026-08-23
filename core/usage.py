@@ -34,8 +34,8 @@ from fastapi import HTTPException
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from backend.database import SessionLocal
-from backend.models import UsageEvent
+from core.db import SessionLocal
+from core.models import UsageEvent
 
 # Action → group. Add new cost-bearing actions here and (if needed) a group
 # limit below; consumers only call check_usage/record_usage with an action name.

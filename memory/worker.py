@@ -16,7 +16,7 @@ import os
 from arq.connections import RedisSettings, create_pool
 from dotenv import load_dotenv
 
-from backend.database import SessionLocal
+from core.db import SessionLocal
 from memory.store import MemoryStore
 from rag.context_builder import ContextBuilder
 
@@ -87,7 +87,7 @@ async def vectorize_exchange(
     def _run() -> None:
         db = SessionLocal()
         try:
-            from backend.models import Conversation, Message
+            from core.models import Conversation, Message
 
             user_msg = db.get(Message, user_message_id)
             if user_msg is None:
@@ -133,7 +133,7 @@ async def rollup_session_summary(ctx, conversation_id) -> None:
     def _run() -> None:
         db = SessionLocal()
         try:
-            from backend.state import (
+            from core.repositories.conversations import (
                 load_conversation_summary,
                 messages_since,
                 save_conversation_summary,
@@ -197,7 +197,7 @@ def _format_messages(messages) -> str:
 
 def _summarize(messages, existing_summary: str | None) -> str:
     """Summarize (or merge into) the rolling summary via the shared OpenRouter model."""
-    from prompts import (
+    from core.prompts import (
         MEMORY_ROLLUP_FRESH_SYSTEM_PROMPT,
         MEMORY_ROLLUP_MERGE_SYSTEM_PROMPT,
         memory_rollup_user_prompt,

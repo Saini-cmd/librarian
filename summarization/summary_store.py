@@ -1,5 +1,5 @@
-from backend.database import SessionLocal
-from backend.models import FileSummary
+from core.db import SessionLocal
+from core.models import FileSummary
 
 
 class SummaryStore:

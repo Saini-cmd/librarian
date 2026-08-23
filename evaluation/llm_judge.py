@@ -10,7 +10,7 @@ whole run.
 import logging
 import re
 
-from prompts import (
+from core.prompts import (
     JUDGE_ANSWER_RELEVANCE_SYSTEM_PROMPT,
     JUDGE_FAITHFULNESS_SYSTEM_PROMPT,
     judge_answer_relevance_user_prompt,

@@ -12,7 +12,8 @@ from embedding.embedding_pipeline import EmbeddingPipeline
 from ingestion.ingestion_pipeline import IngestionPipeline
 from summarization.summarization_pipeline import SummarizationPipeline
 from symbol_graph.graph_builder import build_repo_graph_from_chunks
-from backend.state import ensure_repo_indexing, mark_repo_failed, normalize_repo_url
+from core.repositories.indexed_repo import ensure_repo_indexing, mark_repo_failed
+from core.url import normalize_repo_url
 
 
 logger = logging.getLogger(__name__)

@@ -3,8 +3,8 @@
 Working reference doc for the new Postgres data model. Details are being defined table-by-table; this file is the shared source of truth during the redesign.
 
 - **Status**: complete (9 tables defined) — see Relationships summary + Migration notes below
-- **Scope**: 9 required Postgres tables in `backend/models.py`
-- **Related**: `backend/models.py`, `backend/state.py`, `backend/database.py`, `.env.example`
+- **Scope**: 9 required Postgres tables in `core/models.py`
+- **Related**: `core/models.py`, `core/repositories/*`, `core/db.py`, `.env.example`
 
 ---
 
@@ -188,7 +188,7 @@ Indexes: `chunk_id`, `repo_hash`, `message_id`.
 
 ## Table 9 — `usage_events`
 
-**Purpose**: One row per cost-bearing action a user performs, backing the 24h per-user usage caps (`backend/usage.py`). Append-only; expired rows are purged opportunistically on each `record_usage`.
+**Purpose**: One row per cost-bearing action a user performs, backing the 24h per-user usage caps (`core/usage.py`). Append-only; expired rows are purged opportunistically on each `record_usage`.
 
 **Design notes**:
 - `clerk_id` + `action` + `created_at` — no FK (users are also keyed by `clerk_id` in `users`, but usage is a fire-and-forget ledger; a missing user row must not block recording).

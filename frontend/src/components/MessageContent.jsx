@@ -4,7 +4,7 @@ import { useMarkdown } from "../hooks/useMarkdown";
 const CITATION_RE = /\[(C\d+)\]/g;
 
 const CHIP_CLASS =
-  "inline-flex items-center rounded-full bg-primary/10 text-primary font-mono text-[11px] font-semibold px-2 py-0.5 align-baseline mx-0.5 cursor-pointer transition-all hover:bg-primary/20 active:scale-95";
+  "inline-flex items-center rounded-full bg-primary/10 text-primary font-mono text-[0.6875rem] font-semibold px-2 py-0.5 align-baseline mx-0.5 cursor-pointer transition-all hover:bg-primary/20 active:scale-95";
 
 function linkCitations(html, citations) {
   if (!citations || citations.length === 0 || !html) return html;

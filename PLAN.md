@@ -16,7 +16,7 @@ Investigation established the current graph is built from AST chunks only: entit
 |---|---|
 | RAG corpus | **Frozen**. Fix symbol extraction only for node types *already* AST-chunked; recover richer entity types (enums, traits, structs, consts, modules, …) **graph-side only** by parsing text chunks with tree-sitter (same mechanism as `_js_component_declarations`). No new `wanted_nodes` → zero change to the embedding corpus / retrieval for any language |
 | Ambiguous references | **Dropped** (precision over recall). A reference emits `uses` only when scoped resolution yields exactly one candidate (same-scope → same-file → alias-aware import → unique global). Today's link-to-all behavior is removed for new repos; old-repo fallback stays name-only |
-| Graph persistence | **Unchanged**: graph JSON stays in Postgres `repo_graphs` via `backend/state.py` (no `repo_symbols` table). New `CodeChunk` fields are persisted as additive Qdrant payload keys so the Qdrant rebuild path (`build_repo_graph`) reproduces the same graph |
+| Graph persistence | **Unchanged**: graph JSON stays in Postgres `repo_graphs` via `core/repositories/graph.py` (no `repo_symbols` table). New `CodeChunk` fields are persisted as additive Qdrant payload keys so the Qdrant rebuild path (`build_repo_graph`) reproduces the same graph |
 | Symbol field | `CodeChunk.symbol` stays the **bare name** (embed text / BM25 for working languages stays byte-identical). Qualification lives in new optional fields (`qualified_name`, `parent_symbol`), graph-only |
 | Graph schema versioning | Graph JSON gains a `version` field (default 1); `GET /graph` lazily rebuilds + persists stale graphs. Frontend ignores unknown fields |
 | Node identity | `sym:{file}:{qualified_name}` (bare-name fallback). Dedup by `(file, qualified_name)` — fixes overload/method collapse |
@@ -34,7 +34,7 @@ Investigation established the current graph is built from AST chunks only: entit
 
 ## 4. Data storage
 
-- **Postgres**: no new table. `repo_graphs.graph_json` gains a `version` key (read/write in `backend/state.py:407-419`).
+- **Postgres**: no new table. `repo_graphs.graph_json` gains a `version` key (read/write in `core/repositories/graph.py:407-419`).
 - **Qdrant `code_chunks` payload**: two additive keys — `qualified_name`, `parent_symbol` — written in `vector_store/indexer.py:49-63`, read with `.get()` defaults in `chunk_from_payload` (`vector_store/indexer.py:153-176`) so pre-existing points remain valid. Old repos without these keys degrade to today's name-only behavior.
 - **`CodeChunk`** (`chunking/chunk_model.py`): two new optional fields, `qualified_name: str = ""`, `parent_symbol: str = ""`, populated only for AST chunks from the walk's ancestor chain.
 

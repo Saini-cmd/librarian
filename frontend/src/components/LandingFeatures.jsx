@@ -2,6 +2,12 @@ import { useRef, useLayoutEffect } from "react";
 import gsap from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
 import ClayShapes from "./ClayShapes";
+import {
+  IconSearch,
+  IconLanguage,
+  IconStream,
+  IconPipeline,
+} from "../icons/Icon";
 
 const features = [
   {
@@ -10,6 +16,7 @@ const features = [
     metric: "HYBRID",
     chip: "bg-primary/15 text-primary",
     span: "md:col-span-2",
+    icon: IconSearch,
   },
   {
     title: "Multi-Language Support",
@@ -17,6 +24,7 @@ const features = [
     metric: "12 LANG",
     chip: "bg-accent/15 text-accent",
     span: "md:col-span-1",
+    icon: IconLanguage,
   },
   {
     title: "Streaming Responses",
@@ -24,6 +32,7 @@ const features = [
     metric: "REALTIME",
     chip: "bg-success/15 text-success",
     span: "md:col-span-1",
+    icon: IconStream,
   },
   {
     title: "Battle-Tested Pipeline",
@@ -31,6 +40,7 @@ const features = [
     metric: "5 STAGE",
     chip: "bg-warning/15 text-warning",
     span: "md:col-span-2",
+    icon: IconPipeline,
   },
 ];
 
@@ -100,9 +110,9 @@ export default function LandingFeatures() {
               className={`feature-card clay rounded-3xl bg-white p-8 space-y-4 ${f.span}`}
             >
               <span
-                className={`inline-flex items-center justify-center w-12 h-12 rounded-2xl font-bold text-lg ${f.chip}`}
+                className={`inline-flex items-center justify-center w-12 h-12 rounded-2xl ${f.chip}`}
               >
-                ▣
+                <f.icon className="w-5 h-5" />
               </span>
               <p className="font-mono text-xs font-semibold text-primary">
                 {f.metric}

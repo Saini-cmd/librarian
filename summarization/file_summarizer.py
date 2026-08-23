@@ -1,6 +1,6 @@
 import tiktoken
 
-from prompts import FILE_SUMMARIZATION_SYSTEM_PROMPT, file_summarization_user_prompt
+from core.prompts import FILE_SUMMARIZATION_SYSTEM_PROMPT, file_summarization_user_prompt
 from rag.llm_client import LLMClient
 from summarization.llm_config import build_summarizer_config
 

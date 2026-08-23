@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getChunk } from "../api/client";
+import { IconClose } from "../icons/Icon";
 
-const CARD_WIDTH = 340;
+const CARD_WIDTH = 400;
 const GAP = 10;
 
 export default function CitationCard({ citation, anchorRect, onClose }) {
@@ -105,11 +106,11 @@ export default function CitationCard({ citation, anchorRect, onClose }) {
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <div className="font-mono text-[10px] uppercase tracking-widest text-primary">
+          <div className="font-mono text-[0.625rem] uppercase tracking-widest text-primary">
             Citation · {citation.citation_id}
           </div>
           <div
-            className="mt-1 font-mono text-[11px] text-base-content/60 truncate"
+            className="mt-1 font-mono text-[0.6875rem] text-base-content/60 truncate"
             title={citation.file_path}
           >
             {citation.file_path}:{citation.start_line}-{citation.end_line}
@@ -121,18 +122,18 @@ export default function CitationCard({ citation, anchorRect, onClose }) {
           aria-label="Close citation"
           className="btn btn-circle btn-ghost btn-xs shrink-0"
         >
-          ✕
+          <IconClose className="w-3.5 h-3.5" />
         </button>
       </div>
 
       <div className="mt-2 flex flex-wrap gap-1.5">
         {citation.symbol && (
-          <span className="font-mono text-[10px] rounded-full bg-primary/10 text-primary px-2 py-0.5">
+          <span className="font-mono text-[0.625rem] rounded-full bg-primary/10 text-primary px-2 py-0.5">
             {citation.symbol}
           </span>
         )}
         {chunk?.language && (
-          <span className="font-mono text-[10px] rounded-full bg-base-content/5 text-base-content/60 px-2 py-0.5">
+          <span className="font-mono text-[0.625rem] rounded-full bg-base-content/5 text-base-content/60 px-2 py-0.5">
             {chunk.language}
           </span>
         )}

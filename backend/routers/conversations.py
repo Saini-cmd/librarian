@@ -6,14 +6,12 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from backend.auth import get_current_user
-from backend.database import get_db
-from backend.models import Conversation, Message
-from backend.state import (
-    default_conversation_title,
-    latest_indexed_repo_by_url,
-    normalize_repo_url,
-    upsert_user,
-)
+from core.db import get_db
+from core.models import Conversation, Message
+from core.repositories.conversations import default_conversation_title
+from core.repositories.indexed_repo import latest_indexed_repo_by_url
+from core.repositories.users import upsert_user
+from core.url import normalize_repo_url
 from memory.store import get_memory_store
 
 

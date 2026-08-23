@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useAuth, useUser } from "@clerk/clerk-react";
 import { useNavigate } from "react-router-dom";
 import { getProfile, updateProfile } from "../api/client";
+import { IconBack, IconSave, IconExit } from "../icons/Icon";
 
 export default function SettingsPage() {
   const { user } = useUser();
@@ -36,7 +37,8 @@ export default function SettingsPage() {
           className="btn btn-ghost btn-sm rounded-full font-medium text-sm"
           onClick={() => navigate("/app")}
         >
-          &larr; Back to App
+          <IconBack className="w-4 h-4" />
+          Back to App
         </button>
 
         <div className="glass-card rounded-2xl p-8 space-y-6">
@@ -69,6 +71,7 @@ export default function SettingsPage() {
 
             <div className="flex items-center gap-4">
               <button type="submit" className="btn btn-primary rounded-full px-6">
+                <IconSave className="w-4 h-4" />
                 Save
               </button>
               {saved && (
@@ -85,6 +88,7 @@ export default function SettingsPage() {
             className="btn btn-ghost btn-outline rounded-full px-6 text-xs font-medium"
             onClick={() => signOut()}
           >
+            <IconExit className="w-4 h-4" />
             Sign Out
           </button>
         </div>

@@ -7,10 +7,11 @@ React 18 SPA for repo ingestion and chat with the RAG system. Themeable design-s
 - `src/main.jsx` — React entry point, ClerkProvider + BrowserRouter
 - `src/App.jsx` — Router (/, /app, /settings), protected routes, token provider
 - `src/styles.css` — CSS entry: imports Tailwind, daisyUI, typography plugin + the design system
-- `src/styles/design-system.css` — **the single design-system template**: all daisyUI theme palettes (`clay` default, `apple-glass`, `brutalist-dark`, `glass`), `--ds-*` design tokens (fonts, glow, scanlines, glass surface, clay surface, symbol-graph colors), effect/glass utilities (`.glass-panel`, `.glass-surface`, `.glass-nav`, `.glass-composer`, `.glass-card`, `.glow`, `.graph-surface`, `.scanlines`, `.noise`), **clay utilities** (`.clay`, `.clay-press`, `.clay-ring` — puffy 3D shadows derived from `--ds-clay-*` tokens), base layer (headings use `--ds-font-display`), and `@theme` mapping so `font-sans`/`font-mono`/`border-2`/`rounded-none` follow the active theme
+- `src/styles/design-system.css` — **the single design-system template**: all daisyUI theme palettes (`clay` default, `apple-glass`, `brutalist-dark`, `glass`), `--ds-*` design tokens (fonts, **`--ds-root-font-size` = global text-scale knob** — flip one value to resize the whole app, glow, scanlines, glass surface, clay surface, symbol-graph colors), effect/glass utilities (`.glass-panel`, `.glass-surface`, `.glass-nav`, `.glass-composer`, `.glass-card`, `.glow`, `.graph-surface`, `.scanlines`, `.noise`), **clay utilities** (`.clay`, `.clay-press`, `.clay-ring` — puffy 3D shadows derived from `--ds-clay-*` tokens), base layer (headings use `--ds-font-display`; `html` reads `--ds-root-font-size`), and `@theme` mapping so `font-sans`/`font-mono`/`border-2`/`rounded-none` follow the active theme — breakpoints are **locked to fixed px** in `@theme` so they don't drift when `--ds-root-font-size` changes
 - `src/theme/` — theme switching (`DEFAULT_THEME`, `applyTheme`) + `useGraphTheme` (reads graph colors + React Flow color-mode from CSS tokens)
 - `src/pages/` — Page-level components (LandingPage, AppPage, SettingsPage)
 - `src/components/` — Reusable UI components (Sidebar, Layout, ChatMessages, etc.)
+- `src/icons/` — Curated SVG icon set as React components (`Icon.jsx` registry + named exports, all `fill="currentColor"` for theme-driven color)
 - `src/api/client.js` — Axios instance with auth interceptor + endpoint helpers
 - `src/api/sse.js` — `consumeSSE` reader for `/api/process` + `/sync` progress streaming
 - `src/hooks/` — Custom React hooks (useMarkdown, useApi)
@@ -40,6 +41,7 @@ React 18 SPA for repo ingestion and chat with the RAG system. Themeable design-s
 - **Theme (default):** `clay` — light claymorphism, soft lavender base, white puffy surfaces, system-blue primary, large radii (1.5rem boxes), 1px hairline, soft depth; puffy 3D depth via `.clay`/`.clay-press` dual inset-highlight + drop shadows
 - **Alternate themes:** `apple-glass` (light iOS glass), `brutalist-dark` (dark terminal, 2px square, neon green), `glass` (dark violet glassmorphism) — switch via `DEFAULT_THEME`
 - **Fonts:** Montserrat (body), Poppins (display/headings), JetBrains Mono (mono, data)
+- **Global text scale:** `--ds-root-font-size` in `design-system.css` (default 18px) — flip this single value to resize the whole app; Tailwind breakpoints are px-locked so `lg`/`md` stay at 1024/768px
 - **Corners:** rounded — selectors 1rem, fields 1rem, boxes 1.5rem (`--radius-*` tokens)
 - **Borders:** 1px hairline (`--border`) with low-contrast edges; clay relies on shadows, not borders
 - **Clay surfaces:** `.clay` (cards/blobs) and `.clay-press` (buttons, with press-down active state) — shadows only, compose with any Tailwind bg class; `.clay-ring` adds clay depth to ring/outline shapes (drop-shadow)
@@ -66,6 +68,7 @@ React 18 SPA for repo ingestion and chat with the RAG system. Themeable design-s
 |---|---|
 | `src/api/` | Axios instance, auth interceptor, endpoint helpers |
 | `src/components/` | Reusable daisyUI + GSAP components (Layout, Sidebar, ChatMessages, Landing sections) |
+| `src/icons/` | Curated SVG icon set as React components (fill-based, `currentColor`) |
 | `src/hooks/` | Custom React hooks (useMarkdown, useApi) |
 | `src/pages/` | Route-level pages (Landing, App, Settings) |
 | `src/styles/design-system.css` | Single design-system template — themes, tokens, effects, base |

@@ -11,25 +11,24 @@ from sqlalchemy.orm import Session
 from typing import Iterator
 
 from backend.auth import get_current_user
-from backend.database import SessionLocal, get_db
+from core.db import SessionLocal, get_db
 from backend.ingest_lock import GlobalIngestGate, IngestLock, start_lock_heartbeat
-from backend.models import Conversation, FileSummary, IndexedRepo, RepoGraph
+from core.models import Conversation, FileSummary, IndexedRepo, RepoGraph
 from backend.sse import sse, sse_response, stream_queue
-from backend.state import (
-    COLLECTION_NAME,
-    cited_chunk_ids,
+from backend.reset import COLLECTION_NAME
+from core.usage import check_usage, record_usage
+from core.repositories.conversations import cited_chunk_ids
+from core.repositories.graph import load_repo_graph, save_repo_graph
+from core.repositories.indexed_repo import (
     get_or_create_indexed_repo,
     indexed_repo_by_hash,
     list_user_repos,
-    load_repo_graph,
-    save_repo_graph,
-    upsert_user,
     user_repo_exists,
 )
-from backend.usage import check_usage, record_usage
+from core.repositories.users import upsert_user
 from ingestion.github_api_fetcher import GitHubAPIFetcher
 from orchestration.orchestrator import Orchestrator
-from prompts import EXPLAIN_SYSTEM_PROMPT, explain_user_prompt
+from core.prompts import EXPLAIN_SYSTEM_PROMPT, explain_user_prompt
 from rag.llm_client import LLMClient
 from rag.types import LLMConfig
 from summarization.summary_store import SummaryStore

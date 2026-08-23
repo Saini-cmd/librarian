@@ -173,7 +173,8 @@ curl -X POST http://localhost:8000/api/reset   # wipes Qdrant collection + index
 
 | Path | Purpose |
 |---|---|
-| `backend/` | FastAPI server — REST API for repo ingestion, chat, users, conversations, repos, and **sync/diff**; repo identity = normalized `repo_url` + per-commit `repo_hash`; PostgreSQL-backed state (sync SQLAlchemy, 9 tables; schema in `DB_SCHEMA.md`); **concurrent ingest serialized per commit via a Redis lock with wait-and-reuse** (`ingest_lock.py`); **per-user 24h usage caps** for cost-bearing actions (`usage.py` — `USAGE_INGEST_MAX`/`USAGE_MESSAGE_MAX`) |
+| `backend/` | FastAPI API layer — REST API for repo ingestion, chat, users, conversations, repos, and **sync/diff**; repo identity = normalized `repo_url` + per-commit `repo_hash`; **concurrent ingest serialized per commit via a Redis lock with wait-and-reuse** (`ingest_lock.py`); admin reset (`reset.py`). DB engine/models/repositories/usage/prompts live in `core/` (see below) |
+| `core/` | **Shared foundation** (D39) — depends on nothing but third-party libs: `db.py` (engine/SessionLocal/init_db), `models.py` (9 ORM tables), `repositories/` (data access split from the old `backend/state.py`), `url.py` (`normalize_repo_url`), `usage.py` (per-user 24h caps — `USAGE_INGEST_MAX`/`USAGE_MESSAGE_MAX`), `prompts.py` (all LLM prompt templates). `backend/` + domain packages import from here; core never imports them |
 | `chunking/` | Semantic code chunking (AST + text) — no pickle, no summaries |
 | `embedding/` | Embedding pipeline — vectorize chunks via OpenRouter API and upsert to Qdrant |
 | `frontend/` | React 18 SPA — daisyUI 5 + Tailwind CSS 4, brutalist dark theme, router-based pages (Landing, App, Settings), Axios API client with Clerk auth |
@@ -215,5 +216,4 @@ curl -X POST http://localhost:8000/api/reset   # wipes Qdrant collection + index
 | `docker-compose.yml` | Local infra — `qdrant` (port 6333) + `postgres` (port 5432) services, named volumes; opt-in `tools` profile adds `adminer` (port 8080) |
 | `compose.prod.yml` | Production/self-hosted infra — same services with healthchecks, restart policies, resource hints (see `PRODUCTION.md`) |
 | `.env.example` | Documents every required env key (model APIs, local infra, Clerk) |
-| `prompts.py` | **Single source of truth for every LLM prompt template** (system + user text, D32): RAG answer generation, file summarization, chat-memory rollups, node explanation, eval judges, golden-set paraphrase. Consumers (`rag/`, `summarization/`, `memory/`, `backend/routers`, `evaluation/`) import from here; keep prompt text in this file only |
 

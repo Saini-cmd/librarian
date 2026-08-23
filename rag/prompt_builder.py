@@ -1,6 +1,6 @@
 import logging
 
-from prompts import (
+from core.prompts import (
     RAG_CONTEXT_CHUNK_HEADER,
     RAG_CONTEXT_FILE_HEADER,
     RAG_CONTEXT_SUMMARY,

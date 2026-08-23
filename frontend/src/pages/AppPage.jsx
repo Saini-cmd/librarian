@@ -17,6 +17,12 @@ import {
   getRepoUpdates,
 } from "../api/client";
 import { consumeSSE, readError } from "../api/sse";
+import {
+  IconSend,
+  IconSync,
+  IconChat,
+  IconGraph,
+} from "../icons/Icon";
 
 const extractRepoName = (url) =>
   (url.replace(/\.git$/, "").split("/").pop()) || "repo";
@@ -46,6 +52,7 @@ export default function AppPage() {
   const [graphError, setGraphError] = useState("");
   const [openCitation, setOpenCitation] = useState(null);
   const [quota, setQuota] = useState(null);
+  const [messagesLoading, setMessagesLoading] = useState(false);
   const abortRef = useRef(null);
   const msgIdRef = useRef(0);
 
@@ -202,6 +209,7 @@ export default function AppPage() {
   async function handleSelectConversation(convId) {
     setActiveConvId(convId);
     setOpenCitation(null);
+    setMessagesLoading(true);
     try {
       const data = await getConversation(convId);
       setSelectedRepo(data.repo_name || null);
@@ -219,12 +227,15 @@ export default function AppPage() {
       setChatEnabled(true);
     } catch {
       setMessages([]);
+    } finally {
+      setMessagesLoading(false);
     }
   }
 
   async function handleNewChat() {
     setActiveConvId(null);
     setMessages([]);
+    setMessagesLoading(false);
     setOpenCitation(null);
     setQuota(null);
     setSelectedRepo(null);
@@ -437,7 +448,7 @@ export default function AppPage() {
       <div className="flex flex-col h-dvh overflow-hidden">
         {phase === "ready" ? (
           <>
-            <div className="glass-nav px-6 py-3 flex items-center justify-between gap-4 shrink-0">
+            <div className="glass-nav py-3 pr-6 pl-14 lg:pl-6 flex items-center justify-between gap-4 shrink-0">
               <h1
                 className="text-base font-semibold truncate text-base-content"
                 title={selectedRepo || ""}
@@ -452,30 +463,32 @@ export default function AppPage() {
                 )}
                 <button
                   type="button"
-                  className="btn btn-ghost btn-xs rounded-full"
+                  className="btn btn-sm btn-neutral rounded-full"
                   onClick={handleSync}
                   disabled={syncing || !selectedRepoHash}
                 >
+                  <IconSync className="w-4 h-4" />
                   {syncing ? "Syncing…" : "Sync"}
                 </button>
                 <div className="flex items-center rounded-full bg-base-content/5 p-1 shrink-0">
                 <button
                   type="button"
-                  className={`px-4 py-1.5 rounded-full text-xs font-medium transition-colors ${
+                  className={`px-2.5 lg:px-4 py-1.5 rounded-full text-xs font-medium transition-colors inline-flex items-center gap-1.5 ${
                     view === "chat"
-                      ? "bg-base-100 shadow-sm text-base-content"
+                      ? "bg-primary text-primary-content shadow-sm"
                       : "text-base-content/50"
                   }`}
                   onClick={() => setView("chat")}
                   disabled={!chatEnabled || !selectedRepo}
                 >
-                  Chat
+                  <IconChat className="w-3.5 h-3.5" />
+                  <span className="hidden lg:inline">Chat</span>
                 </button>
                 <button
                   type="button"
-                  className={`px-4 py-1.5 rounded-full text-xs font-medium transition-colors ${
+                  className={`px-2.5 lg:px-4 py-1.5 rounded-full text-xs font-medium transition-colors inline-flex items-center gap-1.5 ${
                     view === "graph"
-                      ? "bg-base-100 shadow-sm text-base-content"
+                      ? "bg-primary text-primary-content shadow-sm"
                       : "text-base-content/50"
                   }`}
                   onClick={() => {
@@ -484,7 +497,8 @@ export default function AppPage() {
                   }}
                   disabled={!chatEnabled || !selectedRepo}
                 >
-                  Graph
+                  <IconGraph className="w-3.5 h-3.5" />
+                  <span className="hidden lg:inline">Graph</span>
                 </button>
               </div>
               </div>
@@ -506,10 +520,12 @@ export default function AppPage() {
             ) : (
               <>
                 <ChatMessages
+                  key={activeConvId}
                   messages={messages}
                   streaming={streaming}
                   onCitationClick={handleCitationClick}
                   repoHash={selectedRepoHash}
+                  loading={messagesLoading}
                 />
 
                 {openCitation && (
@@ -541,7 +557,7 @@ export default function AppPage() {
                       className="btn btn-primary btn-circle btn-sm rounded-full shrink-0"
                       disabled={!chatEnabled || !draft.trim()}
                     >
-                      <span className="text-base leading-none">➤</span>
+                      <IconSend className="w-4 h-4" />
                     </button>
                   </div>
                 </form>
@@ -575,7 +591,7 @@ export default function AppPage() {
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-base-100/90 p-6">
             <div className="w-full max-w-2xl space-y-3">
               <div
-                className="text-center font-mono text-[11px] uppercase tracking-widest text-base-content/60 truncate"
+                className="text-center font-mono text-[0.6875rem] uppercase tracking-widest text-base-content/60 truncate"
                 title={selectedRepo || ""}
               >
                 Syncing {selectedRepo || "repository"}

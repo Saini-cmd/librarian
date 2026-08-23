@@ -19,25 +19,26 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from backend.auth import get_current_user, get_current_user_optional
-from backend.database import SessionLocal, get_db, init_db
+from core.db import SessionLocal, get_db, init_db
 from backend.ingest_lock import GlobalIngestGate, IngestLock, start_lock_heartbeat
+from backend.reset import collection_exists, reset_index_state
 from backend.routers import conversations, repositories, users
 from backend.sse import sse, sse_response, stream_queue
-from backend.usage import check_usage, record_usage
-from backend.state import (
+from core.usage import check_usage, record_usage
+from core.repositories.conversations import (
     add_message,
-    collection_exists,
     get_or_create_conversation,
+    resolve_conversation_repo,
+    write_citations,
+)
+from core.repositories.graph import save_repo_graph
+from core.repositories.indexed_repo import (
     get_or_create_indexed_repo,
     indexed_repo_by_hash,
     last_indexed_repo_for_user,
-    normalize_repo_url,
-    reset_index_state,
-    resolve_conversation_repo,
-    save_repo_graph,
-    upsert_user,
-    write_citations,
 )
+from core.repositories.users import upsert_user
+from core.url import normalize_repo_url
 from ingestion.github_api_fetcher import GitHubAPIFetcher
 from memory.short_term import build_memory_context
 from memory.worker import enqueue_memory_jobs

@@ -40,6 +40,6 @@ def get_db():
 
 
 def init_db() -> None:
-    from backend import models  # noqa: F401  register models with Base
+    from core import models  # noqa: F401  register models with Base
 
     Base.metadata.create_all(bind=engine)

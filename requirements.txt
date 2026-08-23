@@ -5,6 +5,11 @@ tiktoken
 tqdm
 requests
 python-dotenv
+PyJWT
+tree-sitter-languages
+transformers
+pydantic
+anyio
 sqlalchemy
 psycopg2-binary
 langchain-openai

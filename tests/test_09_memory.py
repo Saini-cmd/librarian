@@ -8,16 +8,16 @@ import uuid
 from qdrant_client.models import FieldCondition, Filter, FilterSelector, MatchValue
 from sqlalchemy import inspect
 
-from backend.database import SessionLocal, init_db
-from backend.state import (
+from core.db import SessionLocal, init_db
+from core.repositories.conversations import (
     add_message,
     get_or_create_conversation,
-    get_or_create_indexed_repo,
     list_recent_messages,
     load_conversation_summary,
     save_conversation_summary,
-    upsert_user,
 )
+from core.repositories.indexed_repo import get_or_create_indexed_repo
+from core.repositories.users import upsert_user
 from memory.short_term import build_history
 from memory.store import MemoryStore, COLLECTION_NAME
 
@@ -138,7 +138,7 @@ def main():
     db.commit()
     db.delete(user)
     db.commit()
-    from backend.models import IndexedRepo
+    from core.models import IndexedRepo
 
     db.query(IndexedRepo).filter(IndexedRepo.repo_hash == REPO_HASH).delete()
     db.commit()

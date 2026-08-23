@@ -11,7 +11,7 @@ from dataclasses import dataclass
 
 from dotenv import load_dotenv
 
-from backend.state import list_recent_messages, load_conversation_summary
+from core.repositories.conversations import list_recent_messages, load_conversation_summary
 from memory.store import MemoryStore, get_memory_store
 from rag.context_builder import ContextBuilder
 

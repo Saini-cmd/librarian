@@ -6,6 +6,7 @@ import { consumeSSE, readError } from "../api/sse";
 import MessageContent from "./MessageContent";
 import QuotaNotice from "./QuotaNotice";
 import SymbolGraph2DView from "./SymbolGraph2DView";
+import { IconChevronsLeft } from "../icons/Icon";
 
 function assembleFileCode(chunks) {
   if (!chunks || chunks.length === 0) return "";
@@ -37,6 +38,7 @@ export default function SymbolGraphView({ graph, loading, error, repoHash }) {
   const [explainLoading, setExplainLoading] = useState(false);
   const [explainError, setExplainError] = useState("");
   const [quota, setQuota] = useState(null);
+  const [panelOpen, setPanelOpen] = useState(true);
   const explainTokenRef = useRef(0);
   const explainAbortRef = useRef(null);
 
@@ -80,6 +82,7 @@ export default function SymbolGraphView({ graph, loading, error, repoHash }) {
 
   function handleNodeSelect(data) {
     setSelected(data);
+    setPanelOpen(true);
     setFileChunks([]);
     setExplainText("");
     setExplainLoading(false);
@@ -155,7 +158,7 @@ export default function SymbolGraphView({ graph, loading, error, repoHash }) {
   }
 
   return (
-    <div className="flex-1 min-h-0 flex">
+    <div className="flex-1 min-h-0 flex relative">
       <div className="flex-1 min-w-0 relative">
         {loading ? (
           <div className="flex items-center justify-center h-full">
@@ -178,14 +181,24 @@ export default function SymbolGraphView({ graph, loading, error, repoHash }) {
         )}
       </div>
 
-      {selected && (
-        <aside className="w-96 shrink-0 glass-surface border-l border-base-content/10 flex flex-col min-h-0">
+      {selected && panelOpen && (
+        <aside className="absolute inset-0 z-40 w-full glass-surface flex flex-col min-h-0 border-t lg:border-t-0 lg:border-l border-base-content/10 lg:static lg:z-auto lg:w-96 shrink-0">
           <div className="p-4 border-b border-base-content/10 flex items-start justify-between gap-2">
-            <div className="min-w-0 space-y-1">
-              <div className="font-mono text-[10px] uppercase tracking-widest text-primary">
-                {selected.kind}
+            <div className="min-w-0 flex items-center gap-2">
+              <button
+                className="btn btn-circle btn-ghost btn-sm shrink-0"
+                onClick={() => setPanelOpen(false)}
+                title="Close details"
+                aria-label="Close details"
+              >
+                <IconChevronsLeft className="w-4 h-4" />
+              </button>
+              <div className="min-w-0 space-y-1">
+                <div className="font-mono text-[0.625rem] uppercase tracking-widest text-primary">
+                  {selected.kind}
+                </div>
+                <h3 className="font-semibold text-sm text-base-content truncate">{selected.label}</h3>
               </div>
-              <h3 className="font-semibold text-sm text-base-content truncate">{selected.label}</h3>
             </div>
             <button
               className="btn btn-sm btn-primary shrink-0"
@@ -205,7 +218,7 @@ export default function SymbolGraphView({ graph, loading, error, repoHash }) {
           </div>
 
           <div className="flex-1 overflow-y-auto p-4 space-y-4">
-            <div className="font-mono text-[10px] text-base-content/50 truncate" title={selected.file}>
+            <div className="font-mono text-[0.625rem] text-base-content/50 truncate" title={selected.file}>
               {selected.file}
               {selected.start_line ? `:${selected.start_line}-${selected.end_line}` : ""}
             </div>
@@ -214,7 +227,7 @@ export default function SymbolGraphView({ graph, loading, error, repoHash }) {
               <>
                 {fileEntities.length > 0 && (
                   <section className="space-y-2">
-                    <h4 className="font-mono text-[10px] uppercase tracking-widest text-base-content/40">
+                    <h4 className="font-mono text-[0.625rem] uppercase tracking-widest text-base-content/40">
                       Entities in this file
                     </h4>
                     <ul className="flex flex-wrap gap-1.5">
@@ -232,7 +245,7 @@ export default function SymbolGraphView({ graph, loading, error, repoHash }) {
                 )}
 
                 <section className="space-y-2">
-                  <h4 className="font-mono text-[10px] uppercase tracking-widest text-base-content/40">
+                  <h4 className="font-mono text-[0.625rem] uppercase tracking-widest text-base-content/40">
                     Complete code
                   </h4>
                   {fileChunksLoading ? (
@@ -248,7 +261,7 @@ export default function SymbolGraphView({ graph, loading, error, repoHash }) {
               </>
             ) : (
               <section className="space-y-2">
-                <h4 className="font-mono text-[10px] uppercase tracking-widest text-base-content/40">
+                <h4 className="font-mono text-[0.625rem] uppercase tracking-widest text-base-content/40">
                   Code
                 </h4>
                 <pre className="bg-base-content/5 rounded-xl border border-base-content/10 p-3 text-xs font-mono leading-relaxed max-h-72 overflow-y-auto overflow-x-auto">
@@ -260,7 +273,7 @@ export default function SymbolGraphView({ graph, loading, error, repoHash }) {
             {(explainLoading || explainText || explainError || quota) && (
               <section className="space-y-2 border-t border-base-content/10 pt-3">
                 <div className="flex items-center justify-between">
-                  <h4 className="font-mono text-[10px] uppercase tracking-widest text-base-content/40">
+                  <h4 className="font-mono text-[0.625rem] uppercase tracking-widest text-base-content/40">
                     Explanation
                   </h4>
                   {explainLoading && (
