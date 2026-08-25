@@ -23,6 +23,7 @@ import {
   IconChat,
   IconGraph,
 } from "../icons/Icon";
+import { API_BASE_URL } from "../api/config";
 
 const extractRepoName = (url) =>
   (url.replace(/\.git$/, "").split("/").pop()) || "repo";
@@ -158,7 +159,7 @@ export default function AppPage() {
         headers["Authorization"] = `Bearer ${await getToken()}`;
       }
 
-      const res = await fetch("/api/process", {
+      const res = await fetch(`${API_BASE_URL}/process`, {
         method: "POST",
         headers,
         body: JSON.stringify({ repo_url: repoUrl }),
@@ -271,7 +272,7 @@ export default function AppPage() {
       const headers = { "Content-Type": "application/json" };
       if (isSignedIn) headers["Authorization"] = `Bearer ${await getToken()}`;
       const res = await fetch(
-        `/api/repositories/${encodeURIComponent(selectedRepoHash)}/sync`,
+  `${API_BASE_URL}/repositories/${encodeURIComponent(selectedRepoHash)}/sync`,
         { method: "POST", headers }
       );
       if (!res.ok || !res.body) {
@@ -343,7 +344,7 @@ export default function AppPage() {
         headers["Authorization"] = `Bearer ${await getToken()}`;
       }
 
-      const res = await fetch("/api/chat/stream", {
+      const res = await fetch(`${API_BASE_URL}/chat/stream`, {
         method: "POST",
         headers,
         body: JSON.stringify({

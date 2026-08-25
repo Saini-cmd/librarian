@@ -6,6 +6,8 @@ tqdm
 requests
 python-dotenv
 PyJWT
+cryptography
+rank_bm25
 tree-sitter-languages
 transformers
 pydantic

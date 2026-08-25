@@ -8,6 +8,8 @@ import QuotaNotice from "./QuotaNotice";
 import SymbolGraph2DView from "./SymbolGraph2DView";
 import { IconChevronsLeft } from "../icons/Icon";
 
+import { API_BASE_URL } from "../api/config";
+
 function assembleFileCode(chunks) {
   if (!chunks || chunks.length === 0) return "";
   const sorted = [...chunks].sort(
@@ -111,7 +113,9 @@ export default function SymbolGraphView({ graph, loading, error, repoHash }) {
       const t = await getToken();
       if (t) headers.Authorization = `Bearer ${t}`;
 
-      const res = await fetch(`/api/repositories/${encodeURIComponent(repoHash)}/explain`, {
+      const res = await fetch(
+  `${API_BASE_URL}/repositories/${encodeURIComponent(repoHash)}/explain`,
+  {
         method: "POST",
         headers,
         body: JSON.stringify({

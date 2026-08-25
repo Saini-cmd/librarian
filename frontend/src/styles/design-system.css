@@ -258,7 +258,7 @@
 
   /* Global text scale knob — flip this single value to resize the
      whole app (all rem-based text/spacing follows the root size). */
-  --ds-root-font-size: 18px;
+  --ds-root-font-size: 16px;
 
   /* Effects */
   --ds-glow: oklch(68% 0.33 145);

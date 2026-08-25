@@ -185,10 +185,11 @@ def judge_faithfulness_user_prompt(
     question: str, answer: str, contexts: list[str]
 ) -> str:
     """Assemble the faithfulness-judge user message."""
+    context_text = "\n---\n".join(contexts)
     return (
         f"{JUDGE_QUESTION.format(question=question)}\n\n"
         f"{JUDGE_ANSWER.format(answer=answer)}\n\n"
-        f"{JUDGE_RETRIEVED_CONTEXT.format(context='\n---\n'.join(contexts))}"
+        f"{JUDGE_RETRIEVED_CONTEXT.format(context=context_text)}"
     )
 
 
