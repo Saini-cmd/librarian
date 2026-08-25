@@ -154,7 +154,10 @@ export default function AppPage() {
     setStatusText("Cloning repository...");
 
     try {
-      const headers = { "Content-Type": "application/json" };
+      const headers = {
+        "Content-Type": "application/json",
+        "ngrok-skip-browser-warning": "true",
+      };
       if (isSignedIn) {
         headers["Authorization"] = `Bearer ${await getToken()}`;
       }
@@ -269,7 +272,10 @@ export default function AppPage() {
     setQuota(null);
     setSyncing(true);
     try {
-      const headers = { "Content-Type": "application/json" };
+      const headers = {
+        "Content-Type": "application/json",
+        "ngrok-skip-browser-warning": "true",
+      };
       if (isSignedIn) headers["Authorization"] = `Bearer ${await getToken()}`;
       const res = await fetch(
   `${API_BASE_URL}/repositories/${encodeURIComponent(selectedRepoHash)}/sync`,
@@ -339,7 +345,10 @@ export default function AppPage() {
     abortRef.current = new AbortController();
 
     try {
-      const headers = { "Content-Type": "application/json" };
+      const headers = {
+        "Content-Type": "application/json",
+        "ngrok-skip-browser-warning": "true",
+      };
       if (isSignedIn) {
         headers["Authorization"] = `Bearer ${await getToken()}`;
       }
