@@ -109,7 +109,10 @@ export default function SymbolGraphView({ graph, loading, error, repoHash }) {
     setExplainText("");
     setQuota(null);
     try {
-      const headers = { "Content-Type": "application/json" };
+      const headers = {
+        "Content-Type": "application/json",
+        "ngrok-skip-browser-warning": "true",
+      };
       const t = await getToken();
       if (t) headers.Authorization = `Bearer ${t}`;
 
